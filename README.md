@@ -1,6 +1,6 @@
 # IVLab — 多仪器自动化测试框架
 
-基于 Python + RS-232/USB 的多仪器控制框架，支持 Keithley 2400/2450/2600B 源表的 IV 曲线实时扫描、回滞分析、多次平均降噪，以及 Cornerstone 260 单色仪的 USB/RS-232 通信与波长扫描，并预留 Newport 2359-R 光功率计扩展接口。
+基于 Python + RS-232/USB/GPIB 的多仪器控制框架，支持 Keithley 2400/2450/2600B 源表的 IV 曲线实时扫描、回滞分析、多次平均降噪（2400 支持 RS-232 与 GPIB/NI488），以及 Cornerstone 260 单色仪的 USB/RS-232 通信与波长扫描，并预留 Newport 2359-R 光功率计扩展接口。
 
 ---
 
@@ -8,7 +8,7 @@
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| **Keithley 2400** | ✅ 完整 | SCPI 指令集，标准 RS-232 控制 |
+| **Keithley 2400** | ✅ 完整 | SCPI 指令集，支持 RS-232 与 GPIB/NI488 |
 | **Keithley 2450** | ✅ 完整 | 自动切换至 2400 SCPI 兼容模式 |
 | **Keithley 2600B** | ✅ 完整 | TSP/Lua 脚本模式（`smua`/`smub`） |
 | **双向扫描** | ✅ 完整 | 正向 + 反向，形成闭合 I-V 环 |
@@ -33,15 +33,16 @@
 pip install -r requirements.txt
 ```
 
-依赖：`pyserial`, `numpy`, `matplotlib`, `pandas`
+依赖：`pyserial`, `pyvisa`, `numpy`, `matplotlib`, `pandas`
 
 ### 2. 基础 IV 扫描
 
 ```bash
-python examples/basic_iv_scan.py
+python examples/basic_iv_scan.py              # RS-232
+python examples/basic_iv_scan.py --gpib 22    # GPIB 地址 22
 ```
 
-程序会自动扫描可用 COM 端口，交互式选择后执行单向电压扫描。
+程序会自动扫描可用 COM 端口（RS-232 模式），交互式选择后执行单向电压扫描；加 `--gpib` 则通过 GPIB/NI488 控制。
 
 ### 3. 回滞扫描与分析
 
@@ -79,10 +80,13 @@ RS-232_lab_device-main/          # 项目根目录
 │   │   ├── config.py            # ScanConfig / InstrumentConfig
 │   │   └── logger.py            # 统一日志（控制台 + 文件）
 │   ├── instruments/             # 仪器驱动层（只负责单点控制与查询）
-│   │   ├── base.py              # BaseInstrument 抽象基类
-│   │   ├── scpi_instrument.py   # SCPI 协议适配器
+│   │   ├── base.py              # BaseInstrument 抽象基类（RS-232）
+│   │   ├── scpi_mixin.py        # SCPI 指令集 Mixin
+│   │   ├── scpi_instrument.py   # SCPI 协议适配器（RS-232）
+│   │   ├── gpib_instrument.py   # GPIB 协议适配器（pyvisa）
 │   │   ├── tsp_instrument.py    # TSP/Lua 协议适配器
-│   │   ├── keithley2400.py      # 2400 实现
+│   │   ├── keithley2400.py      # 2400 RS-232 实现
+│   │   ├── keithley2400_gpib.py # 2400 GPIB/NI488 实现
 │   │   ├── keithley2450.py      # 2450 兼容模式
 │   │   ├── keithley2600.py      # 2600B TSP 模式
 │   │   ├── optical_power_meter.py  # 2359-R 预留
@@ -221,6 +225,47 @@ sequence = [
 coord.connect_all()
 data = coord.run_sequence(sequence)
 coord.disconnect_all()
+```
+
+---
+
+## GPIB / NI488 使用说明
+
+Keithley 2400 除 RS-232 外，也支持通过 GPIB（IEEE-488）控制。
+
+### 前提
+
+1. 安装 VISA 后端（任选其一）：
+   - **NI-VISA**：National Instruments 官方驱动，配合 NI GPIB-USB-HS 卡
+   - **Keysight VISA**：配合 Keysight 82357B 等 GPIB-USB 适配器
+   - **pyvisa-py**：纯 Python 后端，无需安装大体积驱动（功能有限）
+
+2. 确认 pyvisa 能识别到仪器：
+
+```python
+import pyvisa
+rm = pyvisa.ResourceManager()
+print(rm.list_resources())
+# 应输出类似：('GPIB0::22::INSTR',)
+```
+
+### 代码示例
+
+```python
+from ivlab.instruments.keithley2400_gpib import Keithley2400GPIB
+
+inst = Keithley2400GPIB(gpib_addr=22)
+inst.connect()
+print(inst.idn())
+inst.output_on()
+print(inst.measure())
+inst.disconnect()
+```
+
+### 命令行示例
+
+```bash
+python examples/basic_iv_scan.py --gpib 22
 ```
 
 ---

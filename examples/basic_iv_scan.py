@@ -1,12 +1,16 @@
 """基础IV扫描示例
 
-运行方式（在项目根目录）: python examples/basic_iv_scan.py
+运行方式（在项目根目录）:
+    python examples/basic_iv_scan.py                      # RS-232
+    python examples/basic_iv_scan.py --gpib 22            # GPIB 地址 22
 """
+import argparse
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ivlab.instruments.keithley2400 import Keithley2400
+from ivlab.instruments.keithley2400_gpib import Keithley2400GPIB
 from ivlab.core.config import ScanConfig
 from ivlab.scanner.iv_scanner import IVScanner
 from ivlab.scanner.data_handler import DataHandler
@@ -14,13 +18,23 @@ from ivlab.utils.port_scanner import interactive_select_port
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Keithley 2400 基础 IV 扫描")
+    parser.add_argument("--gpib", type=int, default=None,
+                        help="GPIB 地址（如 22），指定后走 GPIB；否则走 RS-232")
+    parser.add_argument("--port", type=str, default=None,
+                        help="串口号（如 COM3），不指定则交互式选择")
+    args = parser.parse_args()
+
     print("=== Keithley 2400 基础IV扫描 ===\n")
 
-    # 选择端口
-    port = interactive_select_port()
+    if args.gpib is not None:
+        print(f"使用 GPIB 地址: {args.gpib}")
+        inst = Keithley2400GPIB(gpib_addr=args.gpib)
+    else:
+        port = args.port or interactive_select_port()
+        print(f"使用串口: {port}")
+        inst = Keithley2400(port=port, baudrate=9600)
 
-    # 连接仪器
-    inst = Keithley2400(port=port, baudrate=9600)
     try:
         inst.connect()
         print(f"已连接: {inst.idn()}\n")
