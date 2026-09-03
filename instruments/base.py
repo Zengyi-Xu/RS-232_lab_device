@@ -5,38 +5,59 @@ from abc import ABC, abstractmethod
 from typing import Optional, Any
 from ..core.exceptions import ConnectionError, CommandError, TimeoutError
 from ..core.logger import setup_logger
+from ..utils.gpib_transport import GpibTransport
 
 
 class BaseInstrument(ABC):
     """所有仪器的抽象基类"""
 
-    def __init__(self, port: str, baudrate: int = 9600, timeout: float = 5.0, 
-                 model: str = "", logger=None):
+    def __init__(self, port: Optional[str] = None, baudrate: int = 9600, timeout: float = 5.0,
+                 model: str = "", logger=None, gpib_address: Optional[int] = None,
+                 gpib_board: int = 0):
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
         self.model = model
-        self.ser: Optional[serial.Serial] = None
+        self.gpib_address = gpib_address
+        self.gpib_board = gpib_board
+        self.ser: Optional[Any] = None
         self.connected = False
         self.logger = logger or setup_logger(f"inst.{model}")
         self._debug = False
+
+    @property
+    def use_gpib(self) -> bool:
+        """是否使用 GPIB 接口（否则使用串口）"""
+        return self.gpib_address is not None
 
     def connect(self, retries: int = 3) -> bool:
         """连接仪器，支持重试"""
         for attempt in range(1, retries + 1):
             try:
-                self.logger.info(f"[{self.model}] 尝试连接 {self.port} (第{attempt}次)")
-                self.ser = serial.Serial(
-                    port=self.port,
-                    baudrate=self.baudrate,
-                    bytesize=serial.EIGHTBITS,
-                    parity=serial.PARITY_NONE,
-                    stopbits=serial.STOPBITS_ONE,
-                    timeout=self.timeout,
-                    xonxoff=False,
-                    rtscts=False
-                )
-                time.sleep(0.5)  # 等待串口稳定
+                if self.use_gpib:
+                    self.logger.info(
+                        f"[{self.model}] 尝试连接 GPIB board={self.gpib_board} "
+                        f"address={self.gpib_address} (第{attempt}次)"
+                    )
+                    self.ser = GpibTransport(
+                        address=self.gpib_address,
+                        board=self.gpib_board,
+                        timeout=self.timeout,
+                    )
+                    self.ser.open()
+                else:
+                    self.logger.info(f"[{self.model}] 尝试连接 {self.port} (第{attempt}次)")
+                    self.ser = serial.Serial(
+                        port=self.port,
+                        baudrate=self.baudrate,
+                        bytesize=serial.EIGHTBITS,
+                        parity=serial.PARITY_NONE,
+                        stopbits=serial.STOPBITS_ONE,
+                        timeout=self.timeout,
+                        xonxoff=False,
+                        rtscts=False
+                    )
+                time.sleep(0.5)  # 等待接口稳定
                 self.connected = True
                 self._post_connect()
                 self.logger.info(f"[{self.model}] 连接成功")
@@ -44,7 +65,7 @@ class BaseInstrument(ABC):
             except Exception as e:
                 self.logger.warning(f"[{self.model}] 连接失败: {e}")
                 time.sleep(1)
-        raise ConnectionError(f"[{self.model}] 连接 {self.port} 失败，已重试{retries}次")
+        raise ConnectionError(f"[{self.model}] 连接失败，已重试{retries}次")
 
     def disconnect(self):
         """断开连接，安全关闭输出"""

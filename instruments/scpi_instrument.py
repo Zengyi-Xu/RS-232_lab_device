@@ -7,9 +7,11 @@ from ..core.exceptions import CommandError
 class SCPIInstrument(BaseInstrument):
     """SCPI 指令集仪器基类"""
 
-    def __init__(self, port: str, baudrate: int = 9600, timeout: float = 5.0, 
-                 model: str = "", logger=None):
-        super().__init__(port, baudrate, timeout, model, logger)
+    def __init__(self, port: Optional[str] = None, baudrate: int = 9600, timeout: float = 5.0,
+                 model: str = "", logger=None, gpib_address: Optional[int] = None,
+                 gpib_board: int = 0):
+        super().__init__(port, baudrate, timeout, model, logger,
+                         gpib_address=gpib_address, gpib_board=gpib_board)
         self._source_mode = "voltage"
         self._measure_func = "current"
 

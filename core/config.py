@@ -33,8 +33,10 @@ class ScanConfig:
 @dataclass
 class InstrumentConfig:
     """仪器连接配置"""
-    port: str = "COM1"
+    port: Optional[str] = None        # 串口设备，如 /dev/ttyUSB0（GPIB 方式下可为 None）
     baudrate: int = 9600
     timeout: float = 5.0
     model: str = "2400"  # 2400, 2450, 2600B
     address: str = "smua"  # 2600B通道地址
+    gpib_address: Optional[int] = None  # GPIB 地址（如 24）；设置后走 GPIB，忽略串口
+    gpib_board: int = 0                 # GPIB 板卡号（单台 NI GPIB-USB-HS 时为 0）
