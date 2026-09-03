@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ivlab"
+version = "0.1.0"
+description = "IVLab - 多仪器自动化测试框架（RS-232 仪器控制）"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pyserial>=3.5",
+    "numpy>=1.21.0",
+    "matplotlib>=3.5.0",
+    "pandas>=1.3.0",
+]
+
+[tool.setuptools]
+# 仓库根目录本身就是 ivlab 包（含 __init__.py），用 package-dir 映射
+package-dir = { "ivlab" = "." }
+packages = [
+    "ivlab",
+    "ivlab.core",
+    "ivlab.instruments",
+    "ivlab.scanner",
+    "ivlab.utils",
+]
