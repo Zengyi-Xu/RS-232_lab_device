@@ -43,9 +43,10 @@ class IVScanner:
         inst.set_source_mode(cfg.source_mode)
         time.sleep(0.1)
 
-        # 设置测量功能
+        # 设置测量功能（与源模式互补：电压源测电流，电流源测电压）
         if hasattr(inst, "set_measure_function"):
-            inst.set_measure_function(cfg.measure_func)
+            measure_func = "current" if cfg.source_mode == "voltage" else "voltage"
+            inst.set_measure_function(measure_func)
 
         # 设置合规限值
         inst.set_compliance(cfg.compliance_i)

@@ -13,7 +13,7 @@
 """
 from typing import Optional
 
-from ..core.exceptions import ConfigurationError, CommandError
+from ..core.exceptions import ConfigurationError, CommandError, ConnectionError
 
 
 class SCPIMixin:
@@ -24,23 +24,26 @@ class SCPIMixin:
 
     def _post_connect(self):
         """连接后清空缓冲区并查询 IDN"""
-        try:
-            idn = self.idn()
-            self.logger.info(f"[{self.model}] IDN: {idn}")
-        except Exception:
-            pass
+        idn = self.idn()
+        if not idn:
+            raise ConnectionError(
+                f"[{self.model}] 未收到 *IDN? 响应，请检查线缆/波特率/握手线")
+        self.logger.info(f"[{self.model}] IDN: {idn}")
 
     def set_source_mode(self, mode: str):
-        """设置源模式"""
+        """设置源模式（测量功能自动切换为与源互补的另一端：电压源测电流，电流源测电压）"""
         mode = mode.lower()
         if mode == "voltage":
             self.write(":SOUR:FUNC VOLT")
             self._source_mode = "voltage"
+            self._measure_func = "current"
         elif mode == "current":
             self.write(":SOUR:FUNC CURR")
             self._source_mode = "current"
+            self._measure_func = "voltage"
         else:
             raise ConfigurationError(f"不支持的源模式: {mode}")
+        self.write(f':SENS:FUNC "{self._measure_func.upper()}"')
         self.logger.debug(f"[{self.model}] 源模式设为 {mode}")
 
     def set_compliance(self, value: float):
@@ -101,8 +104,13 @@ class SCPIMixin:
             self.write(f":SENS:{func}:RANG:AUTO OFF")
 
     def set_measure_function(self, func: str):
-        """设置测量功能"""
+        """设置测量功能（必须与源模式互补，不允许测量与源相同的物理量）"""
         func = func.lower()
+        if func == self._source_mode:
+            raise ConfigurationError(
+                f"测量功能不能等于源模式: 当前为{self._source_mode}源，"
+                f"只能测量{'电压' if self._source_mode == 'current' else '电流'}"
+            )
         if func == "current":
             self.write(':SENS:FUNC "CURR"')
             self._measure_func = "current"

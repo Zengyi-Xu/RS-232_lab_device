@@ -92,6 +92,8 @@ RS-232_lab_device-main/          # 项目根目录
 │   │   ├── optical_power_meter.py  # 2359-R 预留
 │   │   ├── monochromator.py     # CS260 RS-232 ASCII 协议
 │   │   ├── cornerstone260.py    # CS260 USB（Newport DLL 桥接）
+│   │   ├── usbtmc_instrument.py # USB-TMC 通用基类（pyvisa + VISA USB 驱动）
+│   │   ├── sva1032x.py          # Siglent SVA1000X 频谱仪驱动
 │   │   └── _cornerstone_bridge.ps1  # 32 位 PowerShell 通信桥
 │   ├── scanner/                 # 扫描与分析引擎（上层编排逻辑）
 │   │   ├── iv_scanner.py        # IV 扫描引擎
@@ -105,8 +107,10 @@ RS-232_lab_device-main/          # 项目根目录
 │   ├── basic_iv_scan.py         # 基础扫描示例
 │   ├── hysteresis_scan.py       # 回滞分析示例
 │   ├── wavelength_scan.py       # CS260 波长扫描示例
-│   └── multi_device_demo.py     # 多仪器协调示例
+│   ├── multi_device_demo.py     # 多仪器协调示例
+│   └── sva1032x_demo.py         # SVA1032X 频谱仪示例
 ├── README.md
+├── CHANGELOG.md
 └── requirements.txt
 ```
 
@@ -131,8 +135,10 @@ inst.reset()            # 仪器复位
 inst.idn()              # 查询型号
 
 # 子类必须实现：
-inst.set_source_mode("voltage")   # 或 "current"
-inst.set_compliance(0.1)          # 限值
+inst.set_source_mode("voltage")   # 或 "current"；切换后自动测量互补物理量：
+                                  #   电压源测电流、电流源测电压（:SENS:FUNC 自动下发），
+                                  #   set_measure_function 不允许设成与源模式相同的物理量
+inst.set_compliance(0.1)          # 限值（对端物理量：电压源限电流、电流源限电压）
 inst.set_nplc(1.0)                # 积分时间
 inst.set_output_level(1.0)        # 设置输出
 inst.measure()                    # 返回 {voltage, current, resistance, timestamp}

@@ -36,6 +36,10 @@ class BaseInstrument(ABC):
                     xonxoff=False,
                     rtscts=False
                 )
+                # Keithley RS-232 口依赖 RTS/CTS、DTR/DSR 握手，
+                # 必须显式拉高，否则仪器不发送数据
+                self.ser.setRTS(True)
+                self.ser.setDTR(True)
                 time.sleep(0.5)  # 等待串口稳定
                 self.connected = True
                 self._post_connect()
@@ -87,10 +91,19 @@ class BaseInstrument(ABC):
                 self.ser.timeout = old_timeout
 
     def query(self, cmd: str, timeout: Optional[float] = None) -> str:
-        """发送指令并读取响应"""
+        """发送指令并读取响应（自动跳过 2400 RS-232 的命令回显）"""
         self.write(cmd)
-        time.sleep(0.05)  # 小延迟确保仪器处理
-        return self.read(timeout=timeout)
+        deadline = time.monotonic() + (timeout or self.timeout or 5.0)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return ""
+            resp = self.read(timeout=remaining)
+            if not resp:
+                return ""
+            if resp.strip() == cmd.strip():
+                continue  # 回显行，继续读实际响应
+            return resp
 
     def reset(self):
         """复位仪器"""
