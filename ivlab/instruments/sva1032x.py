@@ -18,6 +18,7 @@ VNA 模式指令兼容 Agilent E5071C 格式。
     :CALCulate:MARKer[n]:RELative:TO:MARKer m       Delta 参考 Marker (SA)
     :CALCulate[:SELected]:MARKer:REFerence[:STATe]  参考 Marker R (VNA)
 """
+import struct
 import time
 from typing import Optional, Union
 
@@ -70,6 +71,12 @@ class SVA1032X(USBTMCInstrument):
         "plinear": "PLINear", "plog": "PLOGarithmic", "polar": "POLar",
         "mlin": "MLINear", "swr": "SWR",
     }
+    #: 标量格式（每点一个值）
+    VNA_SCALAR_FORMATS = {"mlog", "phase", "gdelay", "slin", "slog",
+                          "mlin", "swr", "real", "imag"}
+    #: 复数格式（每点两个值）
+    VNA_COMPLEX_FORMATS = {"scomplex", "smith", "sadmittance",
+                           "plinear", "plog", "polar"}
     #: Marker 模式（SA 模式含 FIXed，VNA 模式仅 POSition/DELTa/OFF）
     MARKER_MODES_SA = {"normal": "POSition", "delta": "DELTa",
                        "fixed": "FIXed", "off": "OFF"}
@@ -228,11 +235,23 @@ class SVA1032X(USBTMCInstrument):
         if param not in self.VNA_PARAMETERS:
             raise ConfigurationError(f"不支持的 S 参数: {param}")
         self.write(f":CALCulate1:PARameter{trace}:DEFine {param}")
+        time.sleep(0.05)
+        self.write("*WAI")
         self.logger.info(f"[{self.model}] 迹线{trace} 测量参数设为 {param}")
 
     def get_vna_parameter(self, trace: int = 1) -> str:
         self._require_vna("get_vna_parameter")
         return self.query(f":CALCulate1:PARameter{trace}:DEFine?").strip()
+
+    def get_vna_format(self, trace: int = 1) -> str:
+        """查询当前 VNA 迹线显示格式，返回小写键名如 mlog/phase/scomplex"""
+        self._require_vna("get_vna_format")
+        self.select_trace(trace)
+        fmt = self.query(":CALCulate1:FORMat?").strip().upper()
+        for key, val in self.VNA_FORMATS.items():
+            if val.upper() == fmt:
+                return key
+        return fmt.lower()
 
     def set_vna_format(self, fmt: str, trace: int = 1):
         """设置 VNA 迹线显示格式: mlog/phase/gdelay/smith/swr/..."""
@@ -241,7 +260,10 @@ class SVA1032X(USBTMCInstrument):
         if key not in self.VNA_FORMATS:
             raise ConfigurationError(f"不支持的格式: {fmt}，可选 {list(self.VNA_FORMATS)}")
         self.select_trace(trace)
+        time.sleep(0.05)
         self.write(f":CALCulate1:FORMat {self.VNA_FORMATS[key]}")
+        time.sleep(0.05)
+        self.write("*WAI")
         self.logger.debug(f"[{self.model}] 迹线{trace} 显示格式设为 {self.VNA_FORMATS[key]}")
 
     def set_trace_count(self, count: int):
@@ -253,6 +275,86 @@ class SVA1032X(USBTMCInstrument):
         """选中指定迹线为当前迹线（后续 marker/格式命令作用于该迹线）"""
         self._require_vna("select_trace")
         self.write(f":CALCulate1:PARameter{int(trace)}:SELect")
+        time.sleep(0.05)
+        self.write("*WAI")
+
+    def _read_trace_data(self, cmd: str, timeout: float = 30.0) -> list:
+        """读取迹线/格式化数据，兼容 ASCII 与 IEEE 488.2 二进制块。
+
+        部分 Siglent 固件对 ``:TRACe:DATA?`` / ``:CALCulate1:DATA?`` 返回二进制块
+        （以 ``#`` 开头），若直接用 ``query`` 按 ASCII 读取会触发 protocol error。
+        本方法先尝试按 ASCII 读取；若检测到二进制头或 ASCII 解析失败，则回退到
+        二进制读取（默认 4 字节小端 float，若失败再试 8 字节）。
+        读取成功后主动清空 VISA 缓冲区，避免残留数据影响下一次扫描。
+        """
+        self.write("*WAI")
+        time.sleep(0.05)
+        try:
+            resp = self.query(cmd, timeout=timeout)
+            values = []
+            if resp.startswith("#"):
+                values = self._parse_binary_block(resp.encode("latin-1"))
+            else:
+                values = [float(v) for v in resp.split(",") if v.strip()]
+            if values:
+                # 清空接口，防止长数据回复后下一次 *OPC? 报 VI_ERROR_ABORT
+                if self.inst is not None:
+                    try:
+                        self.inst.clear()
+                    except Exception:
+                        pass
+                return values
+        except Exception:
+            pass
+        # ASCII 读取失败或没有数据，尝试二进制读取
+        values = self._read_trace_binary(cmd, timeout=timeout)
+        if values and self.inst is not None:
+            try:
+                self.inst.clear()
+            except Exception:
+                pass
+        return values
+
+    def _read_trace_binary(self, cmd: str, timeout: float = 30.0) -> list:
+        """通过 query_binary_values 读取二进制块并转为 float 列表。"""
+        if not self.connected or self.inst is None:
+            raise ConnectionError(f"[{self.model}] 未连接")
+        old_timeout = self.inst.timeout
+        self.inst.timeout = int(timeout * 1000)
+        try:
+            # 先用 4 字节小端 REAL32 尝试
+            for dtype, is_big in (("f", False), ("f", True), ("d", False), ("d", True)):
+                try:
+                    self.write("*WAI")
+                    values = self.inst.query_binary_values(
+                        cmd, datatype=dtype, is_big_endian=is_big,
+                        header_fmt="ieee", container=list)
+                    if values:
+                        return values
+                except Exception:
+                    continue
+            raise ConnectionError(f"[{self.model}] 无法解析二进制迹线数据")
+        finally:
+            self.inst.timeout = old_timeout
+
+    @staticmethod
+    def _parse_binary_block(raw: bytes) -> list:
+        """解析 IEEE 488.2 二进制块为 float 列表（优先 4 字节小端）。"""
+        if not raw or raw[0:1] != b"#":
+            raise ValueError("不是二进制块")
+        # 格式: #<digit_count><length_digits><data>
+        digit_count = raw[1] - 48
+        length = int(raw[2:2 + digit_count])
+        payload = raw[2 + digit_count:2 + digit_count + length]
+        for fmt in ("<f", ">f", "<d", ">d"):
+            if len(payload) % struct.calcsize(fmt) != 0:
+                continue
+            try:
+                n = len(payload) // struct.calcsize(fmt)
+                return list(struct.unpack(fmt * n, payload))
+            except Exception:
+                continue
+        raise ValueError("无法解析二进制块内的浮点数据")
 
     # ------------------------------------------------------------------
     # Marker
@@ -286,7 +388,9 @@ class SVA1032X(USBTMCInstrument):
     def get_marker(self, marker: int) -> dict:
         """读取 Marker 当前 X（Hz）与 Y（dBm/dB）值"""
         x = float(self.query(f":CALCulate:MARKer{marker}:X?"))
-        y = float(self.query(f":CALCulate:MARKer{marker}:Y?"))
+        y_resp = self.query(f":CALCulate:MARKer{marker}:Y?").strip()
+        # VNA 模式下 Y 可能返回 "amp,0" 或 "amp,phase" 等多值，取第一个作为显示值
+        y = float(y_resp.split(",")[0])
         return {"x": x, "y": y}
 
     def set_marker_peak(self, marker: int):
@@ -330,10 +434,32 @@ class SVA1032X(USBTMCInstrument):
     def single_sweep(self, timeout: float = 30.0):
         """执行一次单次扫描并等待完成（VNA 模式）"""
         self._require_vna("single_sweep")
+        # 先清空仪器/接口状态，避免上一次数据读取残留导致下一次 *OPC? 报 abort
+        try:
+            self.abort_sweep()
+        except Exception:
+            pass
+        self.write("*CLS")
+        time.sleep(0.05)
+        # 写清除 VISA 缓冲区（针对 USB-TMC 残留数据/EOI 问题）
+        if self.inst is not None:
+            try:
+                self.inst.clear()
+            except Exception:
+                pass
+        self.write("*WAI")
+        time.sleep(0.05)
         self.write(":INITiate1:CONTinuous OFF")
+        time.sleep(0.05)
         self.write(":INITiate1:IMMediate")
-        # *OPC? 在操作完成后返回 1
-        self.query("*OPC?", timeout=timeout)
+        time.sleep(0.05)
+        # 用 write + read 分开等待 *OPC?，避免 pyvisa query 合并命令带来的时序问题
+        self.write("*OPC?")
+        time.sleep(0.05)
+        self.read(timeout=timeout)
+        # 确保所有命令/数据已同步
+        self.write("*WAI")
+        time.sleep(0.1)
 
     def set_continuous_sweep(self, on: bool = True):
         """连续扫描开关"""
@@ -347,13 +473,27 @@ class SVA1032X(USBTMCInstrument):
         """读取迹线数据
 
         SA:  返回各点幅度 (dBm) 列表；
-        VNA: 返回 [(real, imag), ...] 复数格式数据列表。
+        VNA: 根据当前显示格式返回标量值列表，或复数 [(re, im), ...] 列表。
         """
-        resp = self.query(f":TRACe:DATA? {trace}", timeout=30.0)
-        values = [float(v) for v in resp.split(",") if v.strip()]
+        self.select_trace(trace)
+        values = self._read_trace_data(f":TRACe:DATA? {trace}", timeout=30.0)
         if self._mode == "vna":
-            return [(values[i], values[i + 1]) for i in range(0, len(values) - 1, 2)]
+            fmt = self.get_vna_format(trace)
+            if fmt in self.VNA_COMPLEX_FORMATS:
+                return [(values[i], values[i + 1])
+                        for i in range(0, len(values) - 1, 2)]
+            return values
         return values
+
+    def get_trace_fdata(self, trace: int = 1) -> list:
+        """读取 VNA 格式化迹线数据 (:CALCulate:DATA? FDATA)
+
+        部分固件会按 [freq0, amp0, freq1, amp1, ...] 或 [amp0, x0, amp1, x1, ...]
+        返回 2*NOP 个数值。本方法返回原始浮点列表，由上层根据频率范围解析。
+        """
+        self._require_vna("get_trace_fdata")
+        self.select_trace(trace)
+        return self._read_trace_data(":CALCulate1:DATA? FDATA", timeout=30.0)
 
     # ------------------------------------------------------------------
     def _require_vna(self, func: str):

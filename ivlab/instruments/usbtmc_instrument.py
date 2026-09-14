@@ -129,14 +129,22 @@ class USBTMCInstrument:
 
     def query(self, cmd: str, timeout: Optional[float] = None) -> str:
         """发送并读取"""
+        if not self.connected or self.inst is None:
+            raise ConnectionError(f"[{self.model}] 未连接")
+        if self._debug:
+            self.logger.debug(f"[{self.model}] SEND: {cmd}")
+        old_timeout = None
         if timeout:
             old_timeout = self.inst.timeout
             self.inst.timeout = int(timeout * 1000)
-            try:
-                return self.inst.query(cmd).strip()
-            finally:
+        try:
+            resp = self.inst.query(cmd).strip()
+            if self._debug:
+                self.logger.debug(f"[{self.model}] RECV: {resp[:200]}{'...' if len(resp) > 200 else ''}")
+            return resp
+        finally:
+            if old_timeout is not None:
                 self.inst.timeout = old_timeout
-        return self.inst.query(cmd).strip()
 
     def query_binary(self, cmd: str, timeout: Optional[float] = None) -> bytes:
         """发送指令并读取二进制块响应（如截图、波形数据）"""

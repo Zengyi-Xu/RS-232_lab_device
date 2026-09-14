@@ -20,6 +20,7 @@
 | **多仪器协调** | ✅ 完整 | 扫描序列定义，支持并行读取 |
 | **CS260 USB** | ✅ 完整 | Newport 官方 DLL 桥接（32 位 PowerShell 子进程） |
 | **CS260 RS-232** | ✅ 完整 | ASCII 指令集（`WAVE`/`SHUTTER`/`GRAT`），轮询到位判定 |
+| **SVA1032X USB** | ✅ 完整 | Siglent 频谱/矢量网络分析仪，USB-TMC（NI-VISA），SA/VNA 模式 |
 | **波长扫描** | ✅ 完整 | 单向/往返波长扫描，可同步读光功率计，CSV 保存 |
 | **2359-R 预留** | 📝 接口 | 协议待填入 `optical_power_meter.py` |
 
@@ -68,6 +69,28 @@ python examples/multi_device_demo.py
 
 展示如何定义多仪器扫描序列（单色仪 → 源表 → 光功率计）。
 
+### 6. SVA1032X 频谱/矢网控制
+
+```bash
+python examples/sva1032x_demo.py                # VNA 模式 (S21)
+python examples/sva1032x_demo.py --mode sa      # 频谱分析模式
+```
+
+通过 USB-B（USB-TMC）连接，自动发现 Siglent 设备；设置模式、扫频范围、
+幅值刻度、Marker 位置/模式/参考点并读取 Marker 读数。
+
+### 7. GPD-4303S 直流电源控制（USB-B）
+
+```bash
+python examples/gpd4303s_demo.py              # 交互式选择 COM 口
+python examples/gpd4303s_demo.py --port COM3  # 指定 COM 口
+python examples/gpd4303s_gui.py               # 图形化监控面板
+```
+
+GPD-4303S 的 USB-B 口在 Windows 上表现为虚拟串口（默认波特率 9600），示例
+演示设置 CH1/CH2/CH4 电压电流、开启总输出、循环读取实际输出并保存 CSV。
+GUI 版本可实时显示四个通道的电压/电流/模式与总输出状态，适配高 DPI 屏幕。
+
 ---
 
 ## 项目结构
@@ -92,8 +115,9 @@ RS-232_lab_device-main/          # 项目根目录
 │   │   ├── optical_power_meter.py  # 2359-R 预留
 │   │   ├── monochromator.py     # CS260 RS-232 ASCII 协议
 │   │   ├── cornerstone260.py    # CS260 USB（Newport DLL 桥接）
-│   │   ├── usbtmc_instrument.py # USB-TMC 通用基类（pyvisa + VISA USB 驱动）
-│   │   ├── sva1032x.py          # Siglent SVA1000X 频谱仪驱动
+│   │   ├── usbtmc_instrument.py # USB-TMC 协议适配器（pyvisa + NI-VISA）
+│   │   ├── sva1032x.py          # Siglent SVA1032X 频谱/矢网分析仪（USB-TMC）
+│   │   ├── gpd4303s.py          # GW Instek GPD-4303S 直流电源（USB-B 虚拟串口）
 │   │   └── _cornerstone_bridge.ps1  # 32 位 PowerShell 通信桥
 │   ├── scanner/                 # 扫描与分析引擎（上层编排逻辑）
 │   │   ├── iv_scanner.py        # IV 扫描引擎
@@ -108,7 +132,9 @@ RS-232_lab_device-main/          # 项目根目录
 │   ├── hysteresis_scan.py       # 回滞分析示例
 │   ├── wavelength_scan.py       # CS260 波长扫描示例
 │   ├── multi_device_demo.py     # 多仪器协调示例
-│   └── sva1032x_demo.py         # SVA1032X 频谱仪示例
+│   ├── sva1032x_demo.py         # SVA1032X 频谱仪示例
+│   ├── gpd4303s_demo.py         # GPD-4303S 电源 USB-B 示例
+│   └── gpd4303s_gui.py          # GPD-4303S 图形化监控面板
 ├── README.md
 ├── CHANGELOG.md
 └── requirements.txt
@@ -211,6 +237,44 @@ mono.disconnect()
 
 RS-232 接口的 CS260 直接使用 `ivlab.instruments.monochromator.Monochromator(port="COMx")`，
 ASCII 指令以 `\r` 终止，`goto_wavelength()` 轮询 `WAVE?` 判定到位。
+
+### SVA1032X（频谱/矢量网络分析仪，USB-TMC）
+
+SVA1032X 的 USB-B Device 口是 **USB-TMC 设备**（不是虚拟串口），
+需安装 NI-VISA（或 Keysight VISA），经 pyvisa 访问。
+运行示例：`python examples/sva1032x_demo.py`（VNA 模式）或 `--mode sa`（频谱模式）。
+
+```python
+from ivlab.instruments.sva1032x import SVA1032X
+
+sva = SVA1032X()              # 按 Siglent VID (0xF4EC) 自动发现；也可传 resource_name
+sva.connect()
+print(sva.idn())
+
+# VNA 模式：S 参数测量
+sva.set_mode("vna")
+sva.set_vna_parameter("S21")               # S11 / S21
+sva.set_vna_format("mlog")                 # 对数幅度
+sva.set_frequency(start=1e6, stop=3.2e9)   # 扫频范围（也支持 center/span）
+sva.set_sweep_points(1601)
+sva.set_amplitude(ref_level=0, scale_per_div=10)  # 参考电平 / Scale-Div
+sva.set_reference_position(5)              # 参考点位置 0~10 格（VNA）
+
+sva.single_sweep()
+sva.set_marker(1, True)
+sva.set_marker_mode(1, "delta")            # normal / delta / fixed(SA) / off
+sva.set_marker_position(1, 2.4e9)          # Marker 位置
+sva.set_marker_reference(1, 2)             # Delta 参考点 = Marker2（SA: Relative-To）
+sva.set_reference_marker(True)             # VNA 参考 Marker R
+print(sva.get_marker(1))                   # {'x': Hz, 'y': dB}
+sva.disconnect()
+
+# SA 模式：频谱分析
+sva.set_mode("sa")
+sva.set_frequency(center=2.4e9, span=100e6)
+sva.set_amplitude(ref_level=-20, scale_per_div=5)   # 单位 dBm
+sva.set_marker_peak_track(1, True)                  # 峰值跟踪
+```
 
 ### MultiInstrumentCoordinator（多仪器协调）
 
@@ -338,6 +402,44 @@ FILTER 3       # 切换到 3 号滤光片
 ```
 
 USB 接口经 Newport DLL 调用同一 ASCII 指令集（`sendCommand`/`getResponse`）。
+
+### Siglent SVA1032X（SCPI，USB-TMC）
+
+```
+:INSTrument:SELect SA|VNA              # 模式切换（频谱 / 矢量网络分析）
+:FREQuency:STARt|STOP|CENTer|SPAN      # 扫频范围（SA/VNA 通用）
+:SWEep:POINts 1601                     # 扫描点数
+:DISPlay:WINDow:TRACe:Y:SCALe:RLEVel -20      # 参考电平 (SA, dBm)
+:DISPlay:WINDow1:TRACe1:Y:SCALe:RLEVel 0      # 参考电平 (VNA, dB)
+:DISPlay:WINDow1:TRACe1:Y:SCALe:PDIVision 10  # Scale/Div
+:DISPlay:WINDow1:TRACe1:Y:SCALe:RPOSition 5    # 参考点位置 0~10 (VNA)
+:CALCulate1:PARameter1:DEFine S11|S21  # VNA 测量参数
+:CALCulate:MARKer1:STATe ON            # Marker 开关
+:CALCulate:MARKer1:MODE POSition|DELTa|FIXed|OFF   # Marker 模式
+:CALCulate:MARKer1:X 2.4 GHz           # Marker 位置
+:CALCulate:MARKer1:Y?                  # Marker 读数
+:CALCulate:MARKer1:RELative:TO:MARKer 2   # Delta 参考 Marker (SA)
+:CALCulate:MARKer:REFerence:STATe ON   # 参考 Marker R (VNA)
+:INITiate1:IMMediate                   # 单次扫描 (VNA)
+:TRACe:DATA? 1                         # 读取迹线数据
+```
+
+### GW Instek GPD-4303S（USB-B 虚拟串口）
+
+默认串口参数：9600/8/N/1，无流控；上电后需先发 `REMOTE` 进入远程模式。
+
+```
+REMOTE             # 进入远程控制模式
+*IDN?              # 读取型号
+VSET1:5.000        # 设置 CH1 电压 5V
+ISET1:0.200        # 设置 CH1 电流 0.2A
+VOUT1?             # 读取 CH1 实际输出电压
+IOUT1?             # 读取 CH1 实际输出电流
+OUT1               # 打开总输出
+OUT0               # 关闭总输出
+STATUS?            # 读取状态（前 4 位通常对应 CH1~CH4 的 CV/CC）
+LOCAL              # 返回本地控制
+```
 
 ---
 

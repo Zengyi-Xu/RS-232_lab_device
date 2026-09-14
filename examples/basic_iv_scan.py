@@ -2,7 +2,8 @@
 
 运行方式（在项目根目录）:
     python examples/basic_iv_scan.py                      # RS-232
-    python examples/basic_iv_scan.py --gpib 22            # GPIB 地址 22
+    python examples/basic_iv_scan.py --gpib 22            # GPIB 地址 22（需 NI-VISA 后端）
+    python examples/basic_iv_scan.py --gpib 22 --gpib-port COM8   # 串口转GPIB适配器（Prologix）
 """
 import argparse
 import sys
@@ -11,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ivlab.instruments.keithley2400 import Keithley2400
 from ivlab.instruments.keithley2400_gpib import Keithley2400GPIB
+from ivlab.instruments.keithley2400_prologix import Keithley2400Prologix
 from ivlab.core.config import ScanConfig
 from ivlab.scanner.iv_scanner import IVScanner
 from ivlab.scanner.data_handler import DataHandler
@@ -21,13 +23,18 @@ def main():
     parser = argparse.ArgumentParser(description="Keithley 2400 基础 IV 扫描")
     parser.add_argument("--gpib", type=int, default=None,
                         help="GPIB 地址（如 22），指定后走 GPIB；否则走 RS-232")
+    parser.add_argument("--gpib-port", type=str, default=None,
+                        help="串口转GPIB适配器端口（如 COM8），与 --gpib 配合走 Prologix 适配器")
     parser.add_argument("--port", type=str, default=None,
                         help="串口号（如 COM3），不指定则交互式选择")
     args = parser.parse_args()
 
     print("=== Keithley 2400 基础IV扫描 ===\n")
 
-    if args.gpib is not None:
+    if args.gpib is not None and args.gpib_port:
+        print(f"使用串口转GPIB适配器: {args.gpib_port}, GPIB 地址: {args.gpib}")
+        inst = Keithley2400Prologix(port=args.gpib_port, gpib_addr=args.gpib)
+    elif args.gpib is not None:
         print(f"使用 GPIB 地址: {args.gpib}")
         inst = Keithley2400GPIB(gpib_addr=args.gpib)
     else:
