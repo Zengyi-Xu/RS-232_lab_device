@@ -91,6 +91,17 @@ GPD-4303S 的 USB-B 口在 Windows 上表现为虚拟串口（默认波特率 96
 演示设置 CH1/CH2/CH4 电压电流、开启总输出、循环读取实际输出并保存 CSV。
 GUI 版本可实时显示四个通道的电压/电流/模式与总输出状态，适配高 DPI 屏幕。
 
+### 8. K2400 + GPD4303S 联合测试例程 GUI
+
+```bash
+python examples/k2400_gpd4303s_routine_gui.py
+```
+
+在同一面板中同时连接 Keithley 2400 与 GPD4303S，实时显示两台仪器的读数与
+连接状态。通过“加载例程文件”导入 Python 插件（见 `examples/routines/`），
+即可按自定义参数执行多仪器联动测试（如 GPD 提供偏置、K2400 执行 IV 扫描）。
+运行过程中实时绘制 I-V 曲线，测试结束后自动保存 CSV 与 JSON 元数据。
+
 ---
 
 ## 项目结构
@@ -134,7 +145,10 @@ RS-232_lab_device-main/          # 项目根目录
 │   ├── multi_device_demo.py     # 多仪器协调示例
 │   ├── sva1032x_demo.py         # SVA1032X 频谱仪示例
 │   ├── gpd4303s_demo.py         # GPD-4303S 电源 USB-B 示例
-│   └── gpd4303s_gui.py          # GPD-4303S 图形化监控面板
+│   ├── gpd4303s_gui.py          # GPD-4303S 图形化监控面板
+│   ├── k2400_gpd4303s_routine_gui.py  # K2400 + GPD4303S 联合测试例程 GUI
+│   └── routines/                # 可导入的测试例程插件目录
+│       └── bias_iv_sweep.py     # 示例：GPD 偏置 + K2400 IV 扫描
 ├── README.md
 ├── CHANGELOG.md
 └── requirements.txt
@@ -296,6 +310,41 @@ coord.connect_all()
 data = coord.run_sequence(sequence)
 coord.disconnect_all()
 ```
+
+---
+
+## 联合测试例程插件接口
+
+`examples/k2400_gpd4303s_routine_gui.py` 支持动态加载用户编写的 Python 例程。
+例程文件需暴露以下接口：
+
+```python
+NAME = "例程名称"
+DESCRIPTION = "例程说明"
+PARAMS = [
+    {"name": "bias_v", "label": "偏置电压 (V)", "type": "float",
+     "default": 3.3, "min": 0.0, "max": 32.0},
+    {"name": "points", "label": "扫描点数", "type": "int",
+     "default": 51, "min": 2, "max": 10001},
+    {"name": "scan_type", "label": "扫描类型", "type": "choice",
+     "choices": ["single", "double", "sweep"], "default": "single"},
+    {"name": "enable", "label": "启用某功能", "type": "bool", "default": True},
+]
+
+def run(instruments, params, report):
+    k2400 = instruments["k2400"]   # Keithley2400 实例
+    gpd = instruments["gpd"]       # GPD4303S 实例
+
+    report("log", text="开始测试")
+    report("progress", current=1, total=10)
+    report("point", voltage=0.0, current=1e-6)
+
+    if report("is_stopped"):       # 检查用户是否请求停止
+        return
+```
+
+支持的参数类型：`float` / `int` / `choice` / `bool`。GUI 会根据 `PARAMS`
+动态生成输入面板，运行结果自动保存到 `data/k2400_gpd_<timestamp>/` 目录。
 
 ---
 
