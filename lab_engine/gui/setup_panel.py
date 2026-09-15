@@ -73,10 +73,13 @@ class SetupPanel(ttk.Frame):
         self.graph = SetupGraph()
         self.selected_node_id: Optional[str] = None
         self._drag_node_id: Optional[str] = None
+        self._drag_node_start: Optional[Tuple[float, float]] = None
+        self._drag_mouse_start: Optional[Tuple[float, float]] = None
         self._drag_start: Optional[Tuple[float, float]] = None
         self._edge_start: Optional[Tuple[str, str]] = None
         self._temp_edge_line: Optional[int] = None
         self._temp_edge_coords: Optional[Tuple[float, float, float, float]] = None
+        self._move_preview_rect: Optional[int] = None
 
         # 画布状态
         self.zoom = 1.0
@@ -237,15 +240,15 @@ class SetupPanel(ttk.Frame):
         line_h = self._to_screen_scalar(18)
         for i, line in enumerate(help_lines):
             if i == 0:
-                font = (UI_FONT, max(8, int(10 * self.scale)), "bold")
+                font = (UI_FONT, 10, "bold")
                 fill = COLOR_PRIMARY
             elif line == "":
                 continue
             elif line.startswith("  "):
-                font = (UI_FONT, max(6, int(8 * self.scale)))
+                font = (UI_FONT, 8)
                 fill = COLOR_TEXT_DIM
             else:
-                font = (UI_FONT, max(6, int(9 * self.scale)))
+                font = (UI_FONT, 9)
                 fill = "#475569"
             self.canvas.create_text(
                 x, y + i * line_h,
@@ -425,7 +428,7 @@ class SetupPanel(ttk.Frame):
         title_text = self.canvas.create_text(
             x + zw / 2, y + title_h / 2,
             text=node.label, fill="white",
-            font=(UI_FONT, max(7, int(9 * self.scale)), "bold"),
+            font=(UI_FONT, 9, "bold"),
             tags=(f"node:{node.node_id}", "node_title"),
         )
         items["title"] = title_text
@@ -434,7 +437,7 @@ class SetupPanel(ttk.Frame):
         type_text = self.canvas.create_text(
             x + zw / 2, y + zh - self._to_screen_scalar(10),
             text=node.node_type, fill=COLOR_TEXT_DIM,
-            font=(UI_FONT, max(6, int(8 * self.scale))),
+            font=(UI_FONT, 8),
             tags=(f"node:{node.node_id}", "node_type"),
         )
         items["type_label"] = type_text
@@ -457,7 +460,7 @@ class SetupPanel(ttk.Frame):
             lbl = self.canvas.create_text(
                 px + self._to_screen_scalar(10), py,
                 text=port.label, fill=COLOR_TEXT_DIM,
-                font=(UI_FONT, max(6, int(8 * self.scale))),
+                font=(UI_FONT, 8),
                 anchor=tk.W, tags=(f"port_label:{node.node_id}:{port.name}",),
             )
             items["labels"].append(lbl)
@@ -476,7 +479,7 @@ class SetupPanel(ttk.Frame):
             lbl = self.canvas.create_text(
                 px - self._to_screen_scalar(10), py,
                 text=port.label, fill=COLOR_TEXT_DIM,
-                font=(UI_FONT, max(6, int(8 * self.scale))),
+                font=(UI_FONT, 8),
                 anchor=tk.E, tags=(f"port_label:{node.node_id}:{port.name}",),
             )
             items["labels"].append(lbl)
@@ -706,6 +709,10 @@ class SetupPanel(ttk.Frame):
         elif kind == "node":
             self._select_node(node_id)
             self._drag_node_id = node_id
+            node = self.graph.get_node(node_id)
+            if node:
+                self._drag_node_start = (node.x, node.y)
+            self._drag_mouse_start = (event.x, event.y)
             self._drag_start = (x, y)
         else:
             self._select_node(None)
@@ -720,17 +727,28 @@ class SetupPanel(ttk.Frame):
         if self._edge_start is not None:
             self._draw_temp_edge(x, y)
         elif self._drag_node_id is not None:
-            dx = x - self._drag_start[0]
-            dy = y - self._drag_start[1]
             node = self.graph.get_node(self._drag_node_id)
-            if node:
-                node.x += dx
-                node.y += dy
+            if node and self._drag_node_start and self._drag_mouse_start:
+                # 鼠标屏幕偏移量 -> 逻辑坐标偏移量
+                dx_screen = event.x - self._drag_mouse_start[0]
+                dy_screen = event.y - self._drag_mouse_start[1]
+                dx = dx_screen / (self.zoom * self.scale)
+                dy = dy_screen / (self.zoom * self.scale)
+
+                new_x = self._drag_node_start[0] + dx
+                new_y = self._drag_node_start[1] + dy
+
                 # 网格吸附（逻辑坐标）
-                node.x = round(node.x / GRID_SIZE) * GRID_SIZE
-                node.y = round(node.y / GRID_SIZE) * GRID_SIZE
-                self._drag_start = (x, y)
+                new_x = round(new_x / GRID_SIZE) * GRID_SIZE
+                new_y = round(new_y / GRID_SIZE) * GRID_SIZE
+
+                # 更新节点位置
+                node.x = new_x
+                node.y = new_y
                 self._redraw_node(self._drag_node_id)
+
+                # 绘制高亮移动预览框
+                self._draw_move_preview(node)
 
     def _on_canvas_release(self, event):
         x, y = self._canvas_to_graph(event.x, event.y)
@@ -757,6 +775,9 @@ class SetupPanel(ttk.Frame):
         elif self._drag_node_id is not None:
             self._drag_node_id = None
             self._drag_start = None
+            self._drag_node_start = None
+            self._drag_mouse_start = None
+            self._clear_move_preview()
 
     def _on_middle_press(self, event):
         self._panning = True
@@ -812,6 +833,24 @@ class SetupPanel(ttk.Frame):
     # ------------------------------------------------------------------
     # 临时连线
     # ------------------------------------------------------------------
+    def _draw_move_preview(self, node: Node):
+        """绘制节点移动预览框（亮蓝色虚线框）。"""
+        self._clear_move_preview()
+        w, h = self._node_size(node)
+        x, y = self._to_screen(node.x, node.y)
+        zw, zh = self._to_screen_scalar(w), self._to_screen_scalar(h)
+        self._move_preview_rect = self.canvas.create_rectangle(
+            x, y, x + zw, y + zh,
+            outline="#3B82F6", width=2, dash=(4, 4),
+            tags=("move_preview",),
+        )
+        self.canvas.tag_raise(self._move_preview_rect)
+
+    def _clear_move_preview(self):
+        if self._move_preview_rect is not None:
+            self.canvas.delete(self._move_preview_rect)
+            self._move_preview_rect = None
+
     def _draw_temp_edge(self, x2: float, y2: float):
         self._clear_temp_edge()
         src_id, src_port_name = self._edge_start
