@@ -4,6 +4,27 @@
 
 ### 新增
 
+- **Lab Engine Setup 框图增强（Phase 2a/2b，解耦保留）**：重构可视化节点编辑器原型。
+  - 节点改为圆角矩形，按类型配色（Host 蓝、Comm 紫、Instrument 绿、Routine 橙）。
+  - 端口按数据类型配色（control 红、comm 黄、data 绿）。
+  - 连线改为贝塞尔曲线，拖拽时实时预览。
+  - 画布支持 `Ctrl+滚轮` 缩放、空格/中键拖拽平移、20px 网格吸附。
+  - 属性面板改为可滚动区域。
+  - 节点右上角显示状态圆点（warning/error），tooltip 显示原因。
+  - 拖连线时高亮类型匹配的端口。
+  - 右下角小地图显示节点分布。
+  - 数据模型 `setup_graph.py` 新增 `validate_status()` 返回节点状态字典。
+  - 仍保留保存/加载 `*.labsetup.json` 与“应用到运行配置”能力。
+
+- **PlotPanel 多曲线增强**：支持按 `series` 字段分组绘制多条曲线，自动分配颜色与图例；数据点超过 5000 时自动抽稀。
+
+- **Lab Engine 通信例程套件（Phase 3）**：把 DMT_PY_NN 的通信流程迁移为引擎例程。
+  - `lab_engine/routines/communication/grid_scan.py`：偏置 × Vpp 二维网格扫描。
+  - `lab_engine/routines/communication/dmt_pipeline.py`：QPSK 信道探测 → bitloading → 解调完整流程。
+  - `lab_engine/routines/communication/nn_equalize.py`：ZY_BiGRU_GPU NN 后均衡。
+  - 新增仪器适配器 `lab_engine/instruments/m8190a.py` 与 `lab_engine/instruments/oscilloscope.py`。
+  - `lab_engine/instruments/__init__.py` 注册 `m8190a` 与 `oscilloscope`。
+
 - **Lab Engine 例程扩展（Phase 2）**：把 `examples/` 中的多个脚本迁移为引擎内置例程。
   - `lab_engine/routines/basic_iv_scan.py`：Keithley 2400 基础 IV 扫描（single/double/sweep）。
   - `lab_engine/routines/hysteresis_scan.py`：双向回滞扫描 + 回滞面积/指数/对称因子分析。

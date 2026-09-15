@@ -127,16 +127,21 @@ Phase 2 内置例程：
 | 单色仪 IV 联动 | `lab_engine/routines/mono_iv_scan.py` | CS260 + K2400 | 扫波长，K2400 固定电压读电流 |
 | 波长扫描 | `lab_engine/routines/wavelength_scan.py` | CS260 | Cornerstone 260 波长扫描 |
 | SVA1032X VNA | `lab_engine/routines/sva1032x_vna.py` | SVA1032X | S11/S21 测量 + Marker 读数 |
+| DMT 网格扫描 | `lab_engine/routines/communication/grid_scan.py` | K2400 (+ AWG/示波器) | 偏置 × Vpp 二维扫描，运行 DMT pipeline |
+| DMT 完整流程 | `lab_engine/routines/communication/dmt_pipeline.py` | AWG/示波器（可选） | QPSK 信道探测 → bitloading → 解调 |
+| NN 后均衡 | `lab_engine/routines/communication/nn_equalize.py` | — | 运行 ZY_BiGRU_GPU 神经网络均衡 |
 
-已注册仪器：`keithley2400`、`gpd4303s`、`cornerstone260`、`sva1032x`。
+已注册仪器：`keithley2400`、`gpd4303s`、`cornerstone260`、`sva1032x`、`m8190a`、`oscilloscope`。
 
-> **Setup 框图（实验性，已暂缓）**：`lab_engine/core/setup_graph.py` 与
-> `lab_engine/gui/setup_panel.py` 已经实现了一个可视化节点编辑器的原型，支持
-> Host / Comm / Instrument / Routine 四种节点以及保存/加载 `*.labsetup.json`。
-> 由于节点关系与交互方式还需要进一步设计，该功能暂时**没有挂载到主界面**，
-> 代码保留在仓库中，待后续重新激活。
+> **Setup 框图（实验性，已解耦）**：`lab_engine/core/setup_graph.py` 与
+> `lab_engine/gui/setup_panel.py` 已重构为可视化节点编辑器，支持
+> Host / Comm / Instrument / Routine 四种节点、圆角矩形、贝塞尔连线、
+> 画布缩放/平移、网格背景、节点状态指示与端口类型高亮。
+> 由于节点关系与交互方式仍需进一步设计，该功能暂时**没有挂载到主界面**，
+> 代码保留在仓库中，可用 `python test_setup_panel.py` 单独预览。
 
-后续通信系统（DMT 流程、网格扫描等）将以“通信例程套件”形式接入同一引擎。
+通信例程套件位于 `lab_engine/routines/communication/`，通过 `sys.path` 自动定位
+同 workspace 下的 `DMT_PY_NN` 仓库并调用其中的 pipeline 函数。
 
 #### 例程插件接口
 
@@ -235,15 +240,21 @@ RS-232_lab_device-main/          # 项目根目录
 │   │   ├── setup_panel.py       # Setup 框图节点编辑器
 │   │   ├── plot_panel.py        # 实时曲线
 │   │   └── log_panel.py         # 日志面板
-│   ├── instruments/             # 仪器注册（复用 ivlab 驱动）
-│   │   └── __init__.py          # 注册 K2400 / GPD4303S / CS260 / SVA1032X
+│   ├── instruments/             # 仪器注册（复用 ivlab 驱动 + DMT_PY_NN 适配器）
+│   │   ├── __init__.py          # 注册 K2400 / GPD4303S / CS260 / SVA1032X / M8190A / 示波器
+│   │   ├── m8190a.py            # M8190A AWG 适配器
+│   │   └── oscilloscope.py      # Keysight 示波器适配器
 │   └── routines/                # 内置例程插件
 │       ├── basic_iv_scan.py     # 基础 IV 扫描
 │       ├── bias_iv_sweep.py     # GPD 偏置 + K2400 IV 扫描
 │       ├── hysteresis_scan.py   # 回滞扫描分析
 │       ├── mono_iv_scan.py      # 单色仪 + 源表联动
 │       ├── sva1032x_vna.py      # SVA1032X VNA 测量
-│       └── wavelength_scan.py   # 波长扫描
+│       ├── wavelength_scan.py   # 波长扫描
+│       └── communication/       # 通信例程套件
+│           ├── grid_scan.py     # DMT 参数网格扫描
+│           ├── dmt_pipeline.py  # DMT 完整流程
+│           └── nn_equalize.py   # NN 后均衡
 ├── examples/                    # 示例脚本（可直接运行）
 │   ├── basic_iv_scan.py         # 基础扫描示例
 │   ├── hysteresis_scan.py       # 回滞分析示例
