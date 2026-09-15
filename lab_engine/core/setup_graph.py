@@ -252,30 +252,87 @@ class SetupGraph:
     # ------------------------------------------------------------------
     def validate(self) -> List[str]:
         """返回错误信息列表；空列表表示通过。"""
+        status_map = self.validate_status()
         errors = []
+        for node_id, info in status_map.items():
+            if info["status"] == "error":
+                errors.append(f"{info['label']}: {info['message']}")
+        return errors
+
+    def validate_status(self) -> Dict[str, Dict[str, Any]]:
+        """返回每个节点的状态字典。
+
+        格式: {node_id: {"status": "normal|warning|error", "label": str, "message": str}}
+        """
+        status: Dict[str, Dict[str, Any]] = {}
+
+        for node in self.nodes.values():
+            status[node.node_id] = {
+                "status": "normal",
+                "label": node.label,
+                "message": "",
+            }
 
         for e in self.edges.values():
             src = self.get_node(e.source_node)
             dst = self.get_node(e.target_node)
             if src is None or dst is None:
-                errors.append(f"连线 {e.edge_id}: 端点节点不存在")
                 continue
             if src.port(e.source_port) is None or dst.port(e.target_port) is None:
-                errors.append(f"连线 {e.edge_id}: 端口不存在")
+                status[dst.node_id] = {
+                    "status": "error",
+                    "label": dst.label,
+                    "message": f"端口 {e.target_port} 不存在",
+                }
 
         # 每个 routine 节点的输入仪器是否已连接
         for node in self.nodes_by_type("routine"):
+            missing = []
             for port in node.ports:
                 if port.direction == "input" and not self.get_source(node.node_id, port.name):
                     alias = port.name.replace("inst_", "")
-                    errors.append(f"例程 '{node.label}' 缺少仪器连接: {alias}")
+                    missing.append(alias)
+            if missing:
+                status[node.node_id] = {
+                    "status": "error",
+                    "label": node.label,
+                    "message": f"缺少仪器连接: {', '.join(missing)}",
+                }
 
         # 每个 instrument 节点是否连到了 comm
         for node in self.nodes_by_type("instrument"):
             if not self.get_source(node.node_id, "comm"):
-                errors.append(f"仪器 '{node.label}' 未连接通信接口")
+                status[node.node_id] = {
+                    "status": "warning",
+                    "label": node.label,
+                    "message": "未连接通信接口",
+                }
 
-        return errors
+        # 没有连线的 comm/host 节点
+        for node in self.nodes_by_type("host"):
+            if not any(e.source_node == node.node_id for e in self.edges.values()):
+                status[node.node_id] = {
+                    "status": "warning",
+                    "label": node.label,
+                    "message": "未连接到通信接口",
+                }
+        for node in self.nodes_by_type("comm"):
+            has_input = any(e.target_node == node.node_id for e in self.edges.values())
+            has_output = any(e.source_node == node.node_id for e in self.edges.values())
+            if not has_input:
+                status[node.node_id] = {
+                    "status": "warning",
+                    "label": node.label,
+                    "message": "缺少输入连接",
+                }
+            elif not has_output:
+                status[node.node_id] = {
+                    "status": "warning",
+                    "label": node.label,
+                    "message": "未连接到任何仪器",
+                }
+
+        return status
 
 
 # ----------------------------------------------------------------------

@@ -426,6 +426,32 @@ class SetupPanel(ttk.Frame):
             )
             items["labels"].append(lbl)
 
+        # 状态指示圆点
+        status_map = self.graph.validate_status()
+        status_info = status_map.get(node.node_id, {})
+        status = status_info.get("status", "normal")
+        if status != "normal":
+            dot_r = max(3, int(4 * self.zoom))
+            dot_x = x + zw - dot_r * 2
+            dot_y = y + title_h + dot_r * 1.5
+            dot_color = {"warning": "#EAB308", "error": "#EF4444"}.get(status, "#64748B")
+            dot = self.canvas.create_oval(
+                dot_x - dot_r, dot_y - dot_r, dot_x + dot_r, dot_y + dot_r,
+                fill=dot_color, outline="white", width=max(1, int(1.5 * self.zoom)),
+                tags=(f"status:{node.node_id}", "status_dot"),
+            )
+            items["status_dot"] = dot
+            msg = status_info.get("message", "")
+            if msg:
+                msg_text = self.canvas.create_text(
+                    dot_x - dot_r - 4, dot_y,
+                    text=msg, fill=dot_color,
+                    font=(UI_FONT, max(6, int(7 * self.zoom))),
+                    anchor=tk.E,
+                    tags=(f"status_msg:{node.node_id}", "status_msg"),
+                )
+                items["status_msg"] = msg_text
+
         self._node_items[node.node_id] = items
         self._update_node_selection_look(node.node_id)
 
@@ -584,6 +610,7 @@ class SetupPanel(ttk.Frame):
         if kind == "port":
             self._edge_start = (node_id, port_name)
             self._drag_start = (x, y)
+            self._highlight_connectable_ports(node_id, port_name)
         elif kind == "node":
             self._select_node(node_id)
             self._drag_node_id = node_id
@@ -630,6 +657,7 @@ class SetupPanel(ttk.Frame):
 
         if self._edge_start is not None:
             self._clear_temp_edge()
+            self._clear_port_highlights()
             kind, node_id, port_name = self._hit_test(x, y)
             if kind == "port" and node_id and port_name:
                 src_id, src_port = self._edge_start
@@ -724,10 +752,47 @@ class SetupPanel(ttk.Frame):
             tags=("temp_edge",),
         )
 
+    def _highlight_connectable_ports(self, source_node_id: str, source_port_name: str):
+        """高亮可连接的端口。"""
+        src_node = self.graph.get_node(source_node_id)
+        src_port = src_node.port(source_port_name) if src_node else None
+        if src_port is None:
+            return
+
+        for node_id, items in self._node_items.items():
+            node = self.graph.get_node(node_id)
+            if node is None:
+                continue
+            for port_name, item_id in items.get("ports", {}).items():
+                port = node.port(port_name)
+                if port is None:
+                    continue
+                # 可连接：方向相反，且类型匹配
+                can_connect = (
+                    port.direction != src_port.direction
+                    and (port.data_type == src_port.data_type
+                         or port.data_type == "any"
+                         or src_port.data_type == "any")
+                )
+                if can_connect:
+                    self.canvas.itemconfigure(item_id, outline="#22C55E")
+                    self.canvas.itemconfigure(item_id, width=max(2, int(3 * self.zoom)))
+                else:
+                    self.canvas.itemconfigure(item_id, outline="#CBD5E1")
+                    self.canvas.itemconfigure(item_id, width=max(1, int(1 * self.zoom)))
+
+    def _clear_port_highlights(self):
+        """清除端口高亮。"""
+        for items in self._node_items.values():
+            for item_id in items.get("ports", {}).values():
+                self.canvas.itemconfigure(item_id, outline="white")
+                self.canvas.itemconfigure(item_id, width=max(1, int(2 * self.zoom)))
+
     def _clear_temp_edge(self):
         if self._temp_edge_line is not None:
             self.canvas.delete(self._temp_edge_line)
             self._temp_edge_line = None
+        self._clear_port_highlights()
 
     # ------------------------------------------------------------------
     # 画布重绘
