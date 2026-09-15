@@ -90,13 +90,16 @@ class _InstrumentCard(tk.Frame):
     """单个仪器的连接卡片。"""
 
     def __init__(self, parent, alias: str, meta: InstrumentMeta,
-                 msg_queue: queue.Queue, on_change: Optional[Callable] = None):
+                 msg_queue: queue.Queue, on_change: Optional[Callable] = None,
+                 on_connection_change: Optional[Callable[[str, bool], None]] = None):
         super().__init__(parent, bg=COLOR_CARD,
                          highlightbackground="#E2E8F0", highlightthickness=1, bd=0)
         self.alias = alias
         self.meta = meta
         self.msg_queue = msg_queue
         self.on_change = on_change
+        self.on_connection_change = on_connection_change
+        self._last_connected = False
         self.state = {
             "connected": False,
             "idn": "",
@@ -260,6 +263,14 @@ class _InstrumentCard(tk.Frame):
 
     def update_ui(self):
         connected = self.state["connected"]
+        if connected != self._last_connected:
+            self._last_connected = connected
+            if self.on_connection_change:
+                try:
+                    self.on_connection_change(self.alias, connected)
+                except Exception:
+                    pass
+
         if connected:
             self.status_lbl.configure(text="已连接", foreground="green")
             self.conn_btn.configure(text="断开")
@@ -285,9 +296,11 @@ class _InstrumentCard(tk.Frame):
 class ConnectionPanel(tk.Frame):
     """仪器连接面板：根据例程声明的仪器动态生成卡片。"""
 
-    def __init__(self, parent, msg_queue: queue.Queue):
+    def __init__(self, parent, msg_queue: queue.Queue,
+                 on_connection_change: Optional[Callable[[str, bool], None]] = None):
         super().__init__(parent, bg=COLOR_BG)
         self.msg_queue = msg_queue
+        self.on_connection_change = on_connection_change
         self.cards: Dict[str, _InstrumentCard] = {}
         self._setup_ui()
 
@@ -313,7 +326,10 @@ class ConnectionPanel(tk.Frame):
             if meta is None:
                 self.msg_queue.put(("log", {"text": f"未知仪器类型: {inst_type}", "level": "error"}))
                 continue
-            card = _InstrumentCard(self.cards_frame, alias, meta, self.msg_queue)
+            card = _InstrumentCard(
+                self.cards_frame, alias, meta, self.msg_queue,
+                on_connection_change=self.on_connection_change,
+            )
             card.pack(fill=tk.X, pady=(0, 8))
             self.cards[alias] = card
 

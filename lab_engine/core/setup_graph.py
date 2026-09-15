@@ -166,6 +166,25 @@ class SetupGraph:
         return [n for n in self.nodes.values() if n.node_type == node_type]
 
     # ------------------------------------------------------------------
+    # 状态覆盖（供外部同步连接状态等）
+    # ------------------------------------------------------------------
+    def set_node_status_override(self, node_id: str, status: str, message: str = "") -> None:
+        """外部设置节点状态覆盖（如仪器连接成功/失败）。
+
+        status: "normal" | "warning" | "error" | "synced"
+        """
+        node = self.nodes.get(node_id)
+        if node is not None:
+            node.data["_status_override"] = status
+            node.data["_status_override_msg"] = message
+
+    def clear_node_status_override(self, node_id: str) -> None:
+        node = self.nodes.get(node_id)
+        if node is not None:
+            node.data.pop("_status_override", None)
+            node.data.pop("_status_override_msg", None)
+
+    # ------------------------------------------------------------------
     # 边操作
     # ------------------------------------------------------------------
     def add_edge(self, source_node: str, source_port: str,
@@ -262,7 +281,8 @@ class SetupGraph:
     def validate_status(self) -> Dict[str, Dict[str, Any]]:
         """返回每个节点的状态字典。
 
-        格式: {node_id: {"status": "normal|warning|error", "label": str, "message": str}}
+        格式: {node_id: {"status": "normal|warning|error|synced", "label": str, "message": str}}
+        外部覆盖优先于自动校验。
         """
         status: Dict[str, Dict[str, Any]] = {}
 
@@ -330,6 +350,16 @@ class SetupGraph:
                     "status": "warning",
                     "label": node.label,
                     "message": "未连接到任何仪器",
+                }
+
+        # 外部覆盖优先
+        for node in self.nodes.values():
+            override = node.data.get("_status_override")
+            if override:
+                status[node.node_id] = {
+                    "status": override,
+                    "label": node.label,
+                    "message": node.data.get("_status_override_msg", ""),
                 }
 
         return status

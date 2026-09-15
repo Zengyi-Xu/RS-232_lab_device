@@ -486,7 +486,11 @@ class SetupPanel(ttk.Frame):
             dot_r = max(3, int(4 * self.zoom))
             dot_x = x + zw - dot_r * 2
             dot_y = y + title_h + dot_r * 1.5
-            dot_color = {"warning": "#EAB308", "error": "#EF4444"}.get(status, "#64748B")
+            dot_color = {
+                "warning": "#EAB308",
+                "error": "#EF4444",
+                "synced": "#22C55E",
+            }.get(status, "#64748B")
             dot = self.canvas.create_oval(
                 dot_x - dot_r, dot_y - dot_r, dot_x + dot_r, dot_y + dot_r,
                 fill=dot_color, outline="white", width=max(1, int(1.5 * self.zoom)),
@@ -1051,6 +1055,18 @@ class SetupPanel(ttk.Frame):
         if self.on_apply:
             self.on_apply(self.graph)
             self._set_status("已同步到运行配置")
+
+    def set_instrument_status(self, alias: str, connected: bool):
+        """根据 Run tab 的仪器连接状态更新 Setup 框图节点。"""
+        for node in self.graph.nodes_by_type("instrument"):
+            node_alias = node.data.get("alias") or node.node_id
+            if node_alias == alias:
+                if connected:
+                    self.graph.set_node_status_override(node.node_id, "synced", "已连接")
+                else:
+                    self.graph.set_node_status_override(node.node_id, "warning", "未连接")
+                self._redraw_node(node.node_id)
+                break
 
     def _set_status(self, text: str):
         self.status_lbl.configure(text=text)
