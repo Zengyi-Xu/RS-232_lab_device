@@ -146,6 +146,9 @@ class SetupPanel(ttk.Frame):
         # 网格背景
         self._draw_grid()
 
+        # 画布帮助文本（无边框，随画布滚动）
+        self._draw_help_text()
+
         # 小地图
         self._build_minimap()
 
@@ -209,17 +212,56 @@ class SetupPanel(ttk.Frame):
         # 固定在 canvas 右下角，不随内容滚动
         self.minimap.place(relx=1.0, rely=1.0, anchor=tk.SE, x=-8, y=-8)
 
+    def _draw_help_text(self):
+        """在画布左上角绘制帮助文本。"""
+        help_lines = [
+            "Setup 框图使用说明",
+            "",
+            "1. 点击顶部按钮添加节点（上位机/通信/仪器/例程）",
+            "2. 拖拽节点移动位置（自动吸附到网格）",
+            "3. 从输出端口拖到输入端口创建连线",
+            "4. 选中节点后可在右侧编辑属性",
+            "5. Delete 删除选中节点",
+            "",
+            "快捷键：",
+            "  Ctrl + 滚轮  —— 缩放画布",
+            "  空格 + 左键  —— 平移画布",
+            "  中键拖拽     —— 平移画布",
+            "",
+            "节点关系：上位机 → 通信接口 → 仪器 → 例程",
+        ]
+        x, y = self._to_screen(30, 30)
+        line_h = self._to_screen_scalar(18)
+        for i, line in enumerate(help_lines):
+            if i == 0:
+                font = (UI_FONT, max(8, int(10 * self.zoom * self.scale)), "bold")
+                fill = COLOR_PRIMARY
+            elif line == "":
+                continue
+            elif line.startswith("  "):
+                font = (UI_FONT, max(6, int(8 * self.zoom * self.scale)))
+                fill = COLOR_TEXT_DIM
+            else:
+                font = (UI_FONT, max(6, int(9 * self.zoom * self.scale)))
+                fill = "#475569"
+            self.canvas.create_text(
+                x, y + i * line_h,
+                text=line, font=font, fill=fill,
+                anchor=tk.NW,
+                tags=("help_text",),
+            )
+
     def _draw_grid(self):
-        """绘制网格背景。"""
+        """绘制网格背景（随 zoom/scale 变化）。"""
         for item in self._grid_items:
             self.canvas.delete(item)
         self._grid_items.clear()
 
-        step = dpi_scale(GRID_SIZE, self.scale)
-        width = dpi_scale(4000, self.scale)
-        height = dpi_scale(3000, self.scale)
-        for x in range(0, int(width), step):
-            for y in range(0, int(height), step):
+        step = self._to_screen_scalar(GRID_SIZE)
+        width = self.canvas.winfo_screenwidth() * 2
+        height = self.canvas.winfo_screenheight() * 2
+        for x in range(0, int(width), max(1, int(step))):
+            for y in range(0, int(height), max(1, int(step))):
                 item = self.canvas.create_oval(
                     x - 1, y - 1, x + 1, y + 1,
                     fill="#E2E8F0", outline="",
@@ -331,34 +373,46 @@ class SetupPanel(ttk.Frame):
         return self.canvas.create_polygon(points, smooth=True, **kwargs)
 
     def _node_size(self, node: Node) -> Tuple[float, float]:
-        """计算节点像素尺寸（未缩放）。"""
+        """计算节点逻辑尺寸（不随 DPI / zoom 缩放）。"""
         n_ports = max(2, len(node.ports))
-        w = dpi_scale(NODE_WIDTH, self.scale)
-        h = dpi_scale(max(NODE_HEIGHT, 50 + n_ports * 28), self.scale)
+        w = NODE_WIDTH
+        h = max(NODE_HEIGHT, 50 + n_ports * 28)
         return w, h
+
+    def _to_screen(self, x: float, y: float) -> Tuple[float, float]:
+        """把数据坐标转换为屏幕坐标（考虑 DPI 与 zoom）。"""
+        return x * self.zoom * self.scale, y * self.zoom * self.scale
+
+    def _to_screen_scalar(self, v: float) -> float:
+        return v * self.zoom * self.scale
+
+    def _from_screen(self, x: float, y: float) -> Tuple[float, float]:
+        """把屏幕坐标转换为数据坐标。"""
+        return x / (self.zoom * self.scale), y / (self.zoom * self.scale)
 
     def _draw_node(self, node: Node):
         self._erase_node(node.node_id)
         items: Dict[str, Any] = {"ports": {}, "labels": []}
 
         w, h = self._node_size(node)
-        zw, zh = w * self.zoom, h * self.zoom
-        x, y = node.x * self.zoom, node.y * self.zoom
+        x, y = self._to_screen(node.x, node.y)
+        zw, zh = self._to_screen_scalar(w), self._to_screen_scalar(h)
+        r = self._to_screen_scalar(8)
 
         color = NODE_COLORS.get(node.node_type, COLOR_PRIMARY)
 
         # 节点主体
         rect = self._round_rect(
-            x, y, x + zw, y + zh, r=dpi_scale(8, self.scale),
-            fill=COLOR_CARD, outline="#CBD5E1", width=2,
+            x, y, x + zw, y + zh, r=r,
+            fill=COLOR_CARD, outline="#CBD5E1", width=max(1, int(2 * self.zoom)),
             tags=(f"node:{node.node_id}", "node"),
         )
         items["rect"] = rect
 
         # 标题背景
-        title_h = dpi_scale(24, self.scale) * self.zoom
+        title_h = self._to_screen_scalar(24)
         title_rect = self._round_rect(
-            x, y, x + zw, y + title_h, r=dpi_scale(8, self.scale),
+            x, y, x + zw, y + title_h, r=r,
             fill=color, outline="",
             tags=(f"node:{node.node_id}", "node_title_bg"),
         )
@@ -368,16 +422,16 @@ class SetupPanel(ttk.Frame):
         title_text = self.canvas.create_text(
             x + zw / 2, y + title_h / 2,
             text=node.label, fill="white",
-            font=(UI_FONT, max(7, int(9 * self.zoom)), "bold"),
+            font=(UI_FONT, max(7, int(9 * self.zoom * self.scale)), "bold"),
             tags=(f"node:{node.node_id}", "node_title"),
         )
         items["title"] = title_text
 
         # 类型标签
         type_text = self.canvas.create_text(
-            x + zw / 2, y + zh - dpi_scale(10, self.scale) * self.zoom,
+            x + zw / 2, y + zh - self._to_screen_scalar(10),
             text=node.node_type, fill=COLOR_TEXT_DIM,
-            font=(UI_FONT, max(6, int(8 * self.zoom))),
+            font=(UI_FONT, max(6, int(8 * self.zoom * self.scale))),
             tags=(f"node:{node.node_id}", "node_type"),
         )
         items["type_label"] = type_text
@@ -388,40 +442,38 @@ class SetupPanel(ttk.Frame):
 
         for port in inputs:
             px, py = self._port_position(node, port, h)
-            px *= self.zoom
-            py *= self.zoom
-            r = PORT_RADIUS * self.zoom
+            px, py = self._to_screen(px, py)
+            pr = self._to_screen_scalar(PORT_RADIUS)
             c = self.canvas.create_oval(
-                px - r, py - r, px + r, py + r,
+                px - pr, py - pr, px + pr, py + pr,
                 fill=PORT_COLORS.get(port.data_type, "#64748B"),
                 outline="white", width=max(1, int(2 * self.zoom)),
                 tags=(f"port:{node.node_id}:{port.name}", "port"),
             )
             items["ports"][port.name] = c
             lbl = self.canvas.create_text(
-                px + dpi_scale(10, self.scale) * self.zoom, py,
+                px + self._to_screen_scalar(10), py,
                 text=port.label, fill=COLOR_TEXT_DIM,
-                font=(UI_FONT, max(6, int(8 * self.zoom))),
+                font=(UI_FONT, max(6, int(8 * self.zoom * self.scale))),
                 anchor=tk.W, tags=(f"port_label:{node.node_id}:{port.name}",),
             )
             items["labels"].append(lbl)
 
         for port in outputs:
             px, py = self._port_position(node, port, h)
-            px *= self.zoom
-            py *= self.zoom
-            r = PORT_RADIUS * self.zoom
+            px, py = self._to_screen(px, py)
+            pr = self._to_screen_scalar(PORT_RADIUS)
             c = self.canvas.create_oval(
-                px - r, py - r, px + r, py + r,
+                px - pr, py - pr, px + pr, py + pr,
                 fill=PORT_COLORS.get(port.data_type, "#64748B"),
                 outline="white", width=max(1, int(2 * self.zoom)),
                 tags=(f"port:{node.node_id}:{port.name}", "port"),
             )
             items["ports"][port.name] = c
             lbl = self.canvas.create_text(
-                px - dpi_scale(10, self.scale) * self.zoom, py,
+                px - self._to_screen_scalar(10), py,
                 text=port.label, fill=COLOR_TEXT_DIM,
-                font=(UI_FONT, max(6, int(8 * self.zoom))),
+                font=(UI_FONT, max(6, int(8 * self.zoom * self.scale))),
                 anchor=tk.E, tags=(f"port_label:{node.node_id}:{port.name}",),
             )
             items["labels"].append(lbl)
@@ -456,6 +508,7 @@ class SetupPanel(ttk.Frame):
         self._update_node_selection_look(node.node_id)
 
     def _port_position(self, node: Node, port: Any, node_h: Optional[float] = None) -> Tuple[float, float]:
+        """返回端口的逻辑坐标（未乘以 zoom/scale）。"""
         w, default_h = self._node_size(node)
         h = node_h if node_h is not None else default_h
         inputs = [p for p in node.ports if p.direction == "input"]
@@ -464,12 +517,12 @@ class SetupPanel(ttk.Frame):
         if port.direction == "input":
             idx = inputs.index(port)
             n = len(inputs)
-            y = node.y + 30 * self.scale + (idx + 1) * ((h - 40 * self.scale) / max(n, 1))
+            y = node.y + 30 + (idx + 1) * ((h - 40) / max(n, 1))
             return node.x, y
         else:
             idx = outputs.index(port)
             n = len(outputs)
-            y = node.y + 30 * self.scale + (idx + 1) * ((h - 40 * self.scale) / max(n, 1))
+            y = node.y + 30 + (idx + 1) * ((h - 40) / max(n, 1))
             return node.x + w, y
 
     def _erase_node(self, node_id: str):
@@ -499,10 +552,8 @@ class SetupPanel(ttk.Frame):
             return
         x1, y1 = self._port_position(src, src_port)
         x2, y2 = self._port_position(dst, dst_port)
-        x1 *= self.zoom
-        y1 *= self.zoom
-        x2 *= self.zoom
-        y2 *= self.zoom
+        x1, y1 = self._to_screen(x1, y1)
+        x2, y2 = self._to_screen(x2, y2)
 
         # 贝塞尔曲线：中点控制点
         cx = (x1 + x2) / 2
@@ -551,29 +602,62 @@ class SetupPanel(ttk.Frame):
             self.canvas.itemconfigure(rect, width=max(1, int(2 * self.zoom)))
 
     def _update_minimap(self):
-        """更新小地图。"""
-        # 简化：在小地图上画节点矩形
+        """更新小地图：显示节点缩略图与当前视口。"""
         self.minimap.delete("all")
         if not self.graph.nodes:
+            self.minimap.create_text(
+                self.minimap.winfo_width() / 2 or 80,
+                self.minimap.winfo_height() / 2 or 60,
+                text="空", fill=COLOR_TEXT_DIM, font=(UI_FONT, 8),
+            )
             return
+
+        # 逻辑坐标范围
         xs = [n.x for n in self.graph.nodes.values()]
         ys = [n.y for n in self.graph.nodes.values()]
         min_x, max_x = min(xs), max(xs)
         min_y, max_y = min(ys), max(ys)
+        # 留一点边距
+        margin = 40
+        min_x -= margin
+        max_x += margin + NODE_WIDTH
+        min_y -= margin
+        max_y += margin + NODE_HEIGHT
         span_x = max(max_x - min_x, 1)
         span_y = max(max_y - min_y, 1)
+
         w = self.minimap.winfo_width() or dpi_scale(160, self.scale)
         h = self.minimap.winfo_height() or dpi_scale(120, self.scale)
+
+        # 绘制节点
         for node in self.graph.nodes.values():
             nx = (node.x - min_x) / span_x * w
             ny = (node.y - min_y) / span_y * h
-            nw = max(4, dpi_scale(NODE_WIDTH, self.scale) / span_x * w)
-            nh = max(3, dpi_scale(NODE_HEIGHT, self.scale) / span_y * h)
+            nw = max(4, NODE_WIDTH / span_x * w)
+            nh = max(3, NODE_HEIGHT / span_y * h)
             self.minimap.create_rectangle(
                 nx, ny, nx + nw, ny + nh,
                 fill=NODE_COLORS.get(node.node_type, COLOR_PRIMARY),
-                outline="",
+                outline="white",
             )
+
+        # 绘制当前视口
+        vx1 = self.canvas.canvasx(0)
+        vy1 = self.canvas.canvasy(0)
+        vx2 = self.canvas.canvasx(self.canvas.winfo_width())
+        vy2 = self.canvas.canvasy(self.canvas.winfo_height())
+        # 转换为逻辑坐标
+        lx1, ly1 = self._from_screen(vx1, vy1)
+        lx2, ly2 = self._from_screen(vx2, vy2)
+        # 映射到小地图
+        mx1 = (lx1 - min_x) / span_x * w
+        my1 = (ly1 - min_y) / span_y * h
+        mx2 = (lx2 - min_x) / span_x * w
+        my2 = (ly2 - min_y) / span_y * h
+        self.minimap.create_rectangle(
+            mx1, my1, mx2, my2,
+            outline=COLOR_PRIMARY, width=2, dash=(3, 3),
+        )
 
     # ------------------------------------------------------------------
     # 鼠标交互
@@ -639,10 +723,9 @@ class SetupPanel(ttk.Frame):
             if node:
                 node.x += dx
                 node.y += dy
-                # 网格吸附
-                grid = GRID_SIZE * self.scale
-                node.x = round(node.x / grid) * grid
-                node.y = round(node.y / grid) * grid
+                # 网格吸附（逻辑坐标）
+                node.x = round(node.x / GRID_SIZE) * GRID_SIZE
+                node.y = round(node.y / GRID_SIZE) * GRID_SIZE
                 self._drag_start = (x, y)
                 self._redraw_node(self._drag_node_id)
 
