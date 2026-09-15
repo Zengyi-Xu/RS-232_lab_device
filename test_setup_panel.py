@@ -6,18 +6,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import tkinter as tk
 from lab_engine.core.registry import RoutineRegistry
 from lab_engine.gui.setup_panel import SetupPanel
+from lab_engine.gui.shell import set_dpi_aware, set_tk_scaling, setup_plot_fonts
 
 # 触发仪器注册
 import lab_engine.instruments  # noqa: F401
 
+set_dpi_aware()
 root = tk.Tk()
 root.title("Setup Panel Test")
+scale = set_tk_scaling(root)
+setup_plot_fonts()
 root.geometry("1200x800")
 
 registry = RoutineRegistry()
 registry.discover([Path(__file__).resolve().parent / "lab_engine" / "routines"])
 
-panel = SetupPanel(root, routine_registry=registry)
+panel = SetupPanel(root, routine_registry=registry, scale=scale)
 panel.pack(fill=tk.BOTH, expand=True)
 
 root.mainloop()

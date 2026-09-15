@@ -60,11 +60,14 @@ class SetupPanel(ttk.Frame):
         parent,
         routine_registry: RoutineRegistry,
         on_apply: Optional[Callable[[SetupGraph], None]] = None,
-        scale: float = 1.0,
+        scale: Optional[float] = None,
     ):
         super().__init__(parent)
         self.routine_registry = routine_registry
         self.on_apply = on_apply
+        if scale is None:
+            from lab_engine.gui.shell import get_system_dpi
+            scale = max(get_system_dpi() / 96.0, 1.0)
         self.scale = scale
 
         self.graph = SetupGraph()
