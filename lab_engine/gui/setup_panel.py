@@ -663,9 +663,10 @@ class SetupPanel(ttk.Frame):
     # 鼠标交互
     # ------------------------------------------------------------------
     def _hit_test(self, x: float, y: float):
-        """返回命中的对象信息（x, y 为画布坐标，已除以 zoom）。"""
-        sx, sy = x * self.zoom, y * self.zoom
-        items = self.canvas.find_overlapping(sx - 2, sy - 2, sx + 2, sy + 2)
+        """返回命中的对象信息（x, y 为逻辑坐标）。"""
+        sx, sy = self._to_screen(x, y)
+        r = max(2, int(3 * self.zoom * self.scale))
+        items = self.canvas.find_overlapping(sx - r, sy - r, sx + r, sy + r)
         for item in reversed(items):
             tags = self.canvas.gettags(item)
             for tag in tags:
@@ -678,8 +679,8 @@ class SetupPanel(ttk.Frame):
         return None, None, None
 
     def _canvas_to_graph(self, x: float, y: float) -> Tuple[float, float]:
-        """把画布屏幕坐标转换为图坐标。"""
-        return self.canvas.canvasx(x) / self.zoom, self.canvas.canvasy(y) / self.zoom
+        """把画布屏幕坐标转换为逻辑坐标。"""
+        return self._from_screen(self.canvas.canvasx(x), self.canvas.canvasy(y))
 
     def _on_canvas_press(self, event):
         x, y = self._canvas_to_graph(event.x, event.y)

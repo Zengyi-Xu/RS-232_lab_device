@@ -5,6 +5,8 @@
 from pathlib import Path
 import sys
 
+from ivlab.core.exceptions import ConnectionError
+
 _DMT_PY_NN = Path(__file__).resolve().parents[3] / "DMT_PY_NN"
 if _DMT_PY_NN.exists():
     sys.path.insert(0, str(_DMT_PY_NN))
@@ -33,13 +35,15 @@ class Oscilloscope:
         )
 
     def connect(self, retries: int = 2):
+        last_error = None
         for _ in range(retries):
             try:
                 self._scope.connect()
                 return True
-            except Exception:
+            except Exception as exc:
+                last_error = exc
                 continue
-        return False
+        raise ConnectionError(f"示波器连接失败: {last_error}")
 
     def disconnect(self):
         self._scope.close()

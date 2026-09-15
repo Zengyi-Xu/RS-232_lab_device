@@ -114,6 +114,7 @@ class IVScanner:
             time.sleep(0.2)
 
         t_start = time.time()
+        i = -1
 
         for i, v in enumerate(voltages):
             if self._stop_flag:

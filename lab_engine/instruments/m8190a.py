@@ -5,6 +5,8 @@
 from pathlib import Path
 import sys
 
+from ivlab.core.exceptions import ConnectionError
+
 # 允许 lab_engine 访问 DMT_PY_NN 中的驱动（如果两个仓库在同一 workspace 下）
 _DMT_PY_NN = Path(__file__).resolve().parents[3] / "DMT_PY_NN"
 if _DMT_PY_NN.exists():
@@ -38,13 +40,15 @@ class M8190A:
         )
 
     def connect(self, retries: int = 2):
+        last_error = None
         for _ in range(retries):
             try:
                 self._ctrl.connect()
                 return True
-            except Exception:
+            except Exception as exc:
+                last_error = exc
                 continue
-        return False
+        raise ConnectionError(f"M8190A 连接失败: {last_error}")
 
     def disconnect(self):
         self._ctrl.close()

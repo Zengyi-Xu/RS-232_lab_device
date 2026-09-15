@@ -164,9 +164,10 @@ class PlotPanel(tk.Frame):
 
 
 def _downsample(points: List[Dict[str, Any]], max_points: int = _MAX_POINTS_PER_SERIES) -> List[Dict[str, Any]]:
-    """随机抽稀数据点。"""
+    """等间隔抽稀数据点，保持时间顺序。"""
     if len(points) <= max_points:
         return points
-    indices = np.random.choice(len(points), max_points, replace=False)
-    indices = sorted(indices)
+    step = len(points) / max_points
+    indices = [int(i * step) for i in range(max_points)]
+    indices[-1] = len(points) - 1  # 保留最后一个点
     return [points[i] for i in indices]

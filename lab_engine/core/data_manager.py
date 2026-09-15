@@ -31,15 +31,15 @@ class DataManager:
         return run_id, run_dir
 
     def save_csv(self, run_dir: Path, points: List[Dict[str, Any]], filename: str = "data.csv") -> Path:
-        """把数据点列表保存为 CSV。"""
+        """把数据点列表保存为 CSV。允许不同 point 有不同字段，取并集。"""
         if not points:
             logger.warning("No points to save")
             return run_dir / filename
 
         path = run_dir / filename
-        fieldnames = list(points[0].keys())
+        fieldnames = sorted({k for p in points for k in p.keys()})
         with open(path, "w", newline="", encoding="utf-8-sig") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer = csv.DictWriter(f, fieldnames=fieldnames, restval="")
             writer.writeheader()
             for row in points:
                 writer.writerow(row)
