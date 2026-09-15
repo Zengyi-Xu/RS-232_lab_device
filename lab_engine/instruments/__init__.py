@@ -7,6 +7,8 @@ from ivlab.instruments.gpd4303s import GPD4303S
 from ivlab.instruments.keithley2400 import Keithley2400
 from ivlab.instruments.sva1032x import SVA1032X
 
+from lab_engine.instruments.m8190a import M8190A
+from lab_engine.instruments.oscilloscope import Oscilloscope
 from lab_engine.core.registry import InstrumentRegistry
 
 
@@ -54,5 +56,26 @@ InstrumentRegistry.register(
     connection_params=[
         {"name": "port", "label": "串口", "type": "port"},
         {"name": "baudrate", "label": "波特率", "type": "int", "default": 9600},
+    ],
+)
+
+InstrumentRegistry.register(
+    key="m8190a",
+    cls_type=M8190A,
+    name="Keysight M8190A AWG",
+    connection_params=[
+        {"name": "visa_addr", "label": "VISA 地址", "type": "str", "default": M8190A.DEFAULT_VISA},
+        {"name": "sample_rate", "label": "采样率 (Hz)", "type": "float", "default": M8190A.DEFAULT_SAMPLE_RATE},
+        {"name": "vpp", "label": "输出幅度 (Vpp)", "type": "float", "default": M8190A.DEFAULT_VPP},
+        {"name": "output_route", "label": "输出路径", "type": "choice", "choices": ["DC", "AC", "DAC"], "default": "DAC"},
+    ],
+)
+
+InstrumentRegistry.register(
+    key="oscilloscope",
+    cls_type=Oscilloscope,
+    name="Keysight 示波器",
+    connection_params=[
+        {"name": "resource", "label": "VISA 资源名（留空自动发现）", "type": "str", "default": ""},
     ],
 )
