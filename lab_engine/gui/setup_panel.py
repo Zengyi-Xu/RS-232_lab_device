@@ -3,11 +3,13 @@
 提供基于 tk.Canvas 的可视化节点编辑器：
 - 工具栏添加 Host / Comm / Instrument / Routine 节点
 - 拖拽移动节点
-- 在端口之间连线
+- 在端口之间连线（贝塞尔曲线）
+- 画布缩放、平移、网格吸附
 - 属性面板编辑节点参数
 - 保存/加载 .labsetup.json
 - 一键同步到 Run tab
 """
+import math
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -31,6 +33,25 @@ from lab_engine.gui.shell import (
 )
 
 
+# 节点类型配色
+NODE_COLORS = {
+    "host": "#3B82F6",      # 蓝
+    "comm": "#8B5CF6",      # 紫
+    "instrument": "#10B981",  # 绿
+    "routine": "#F59E0B",   # 橙
+}
+
+# 端口类型配色
+PORT_COLORS = {
+    "control": "#EF4444",   # 红
+    "comm": "#EAB308",      # 黄
+    "data": "#22C55E",      # 绿
+    "any": "#64748B",       # 灰
+}
+
+GRID_SIZE = 20
+
+
 class SetupPanel(ttk.Frame):
     """Setup 框图编辑器。"""
 
@@ -52,17 +73,24 @@ class SetupPanel(ttk.Frame):
         self._drag_start: Optional[Tuple[float, float]] = None
         self._edge_start: Optional[Tuple[str, str]] = None
         self._temp_edge_line: Optional[int] = None
+        self._temp_edge_coords: Optional[Tuple[float, float, float, float]] = None
 
-        # canvas item 缓存：node_id -> {rect, title, port_items: {name: circle}, label_items}
+        # 画布状态
+        self.zoom = 1.0
+        self.pan_start: Optional[Tuple[float, float]] = None
+        self._space_pressed = False
+        self._panning = False
+
+        # canvas item 缓存
         self._node_items: Dict[str, Dict[str, Any]] = {}
         self._edge_items: Dict[str, int] = {}
+        self._grid_items: List[int] = []
 
         self._prop_vars: Dict[str, tk.Variable] = {}
         self._prop_widgets: List[tk.Widget] = []
 
         self._build_ui()
         self._bind_events()
-        self._refresh_toolbar_state()
 
     # ------------------------------------------------------------------
     # UI 构建
@@ -105,7 +133,7 @@ class SetupPanel(ttk.Frame):
             bg=COLOR_BG,
             highlightthickness=1,
             highlightbackground="#CBD5E1",
-            scrollregion=(0, 0, dpi_scale(2000, self.scale), dpi_scale(1500, self.scale)),
+            scrollregion=(0, 0, dpi_scale(4000, self.scale), dpi_scale(3000, self.scale)),
         )
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -115,22 +143,46 @@ class SetupPanel(ttk.Frame):
         hbar.pack(fill=tk.X)
         self.canvas.configure(xscrollcommand=hbar.set, yscrollcommand=vbar.set)
 
-        # 属性面板
+        # 网格背景
+        self._draw_grid()
+
+        # 小地图
+        self._build_minimap()
+
+        # 属性面板（可滚动）
         prop_card = tk.Frame(body, bg=COLOR_CARD,
                              highlightbackground="#E2E8F0", highlightthickness=1, bd=0)
         prop_card.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
         prop_card.pack_propagate(False)
-        prop_card.configure(width=dpi_scale(280, self.scale))
+        prop_card.configure(width=dpi_scale(300, self.scale))
 
         prop_inner = tk.Frame(prop_card, bg=COLOR_CARD)
         prop_inner.pack(fill=tk.BOTH, expand=True, padx=12, pady=10)
 
         ttk.Label(prop_inner, text="属性", style="Section.TLabel").pack(anchor=tk.W, pady=(0, 8))
-        self.prop_frame = tk.Frame(prop_inner, bg=COLOR_CARD)
-        self.prop_frame.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(prop_inner, text="提示: 选中节点后编辑属性，拖拽端口连线。",
-                  wraplength=dpi_scale(240, self.scale), style="DimCard.TLabel").pack(
+        # 可滚动属性区域
+        self.prop_canvas = tk.Canvas(
+            prop_inner,
+            bg=COLOR_CARD,
+            highlightthickness=0,
+            width=dpi_scale(260, self.scale),
+        )
+        prop_vsb = ttk.Scrollbar(prop_inner, orient=tk.VERTICAL, command=self.prop_canvas.yview)
+        self.prop_canvas.configure(yscrollcommand=prop_vsb.set)
+        prop_vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.prop_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.prop_frame = tk.Frame(self.prop_canvas, bg=COLOR_CARD)
+        self.prop_canvas.create_window((0, 0), window=self.prop_frame, anchor="nw",
+                                        width=dpi_scale(260, self.scale))
+        self.prop_frame.bind(
+            "<Configure>",
+            lambda _e: self.prop_canvas.configure(scrollregion=self.prop_canvas.bbox("all"))
+        )
+
+        ttk.Label(prop_inner, text="提示: 选中节点后编辑属性，拖拽端口连线。\nCtrl+滚轮缩放，空格+左键平移。",
+                  wraplength=dpi_scale(260, self.scale), style="DimCard.TLabel").pack(
             side=tk.BOTTOM, anchor=tk.W, pady=(8, 0)
         )
 
@@ -144,31 +196,69 @@ class SetupPanel(ttk.Frame):
         self.status_lbl = ttk.Label(footer, text="就绪")
         self.status_lbl.pack(side=tk.LEFT)
 
+    def _build_minimap(self):
+        """右下角小地图。"""
+        self.minimap = tk.Canvas(
+            self.canvas,
+            width=dpi_scale(160, self.scale),
+            height=dpi_scale(120, self.scale),
+            bg="#E2E8F0",
+            highlightthickness=1,
+            highlightbackground="#CBD5E1",
+        )
+        # 固定在 canvas 右下角，不随内容滚动
+        self.minimap.place(relx=1.0, rely=1.0, anchor=tk.SE, x=-8, y=-8)
+
+    def _draw_grid(self):
+        """绘制网格背景。"""
+        for item in self._grid_items:
+            self.canvas.delete(item)
+        self._grid_items.clear()
+
+        step = dpi_scale(GRID_SIZE, self.scale)
+        width = dpi_scale(4000, self.scale)
+        height = dpi_scale(3000, self.scale)
+        for x in range(0, int(width), step):
+            for y in range(0, int(height), step):
+                item = self.canvas.create_oval(
+                    x - 1, y - 1, x + 1, y + 1,
+                    fill="#E2E8F0", outline="",
+                )
+                self._grid_items.append(item)
+        self.canvas.tag_lower("grid")
+        for item in self._grid_items:
+            self.canvas.addtag_withtag("grid", item)
+
     def _bind_events(self):
         self.canvas.bind("<ButtonPress-1>", self._on_canvas_press)
         self.canvas.bind("<B1-Motion>", self._on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
-        self.canvas.bind("<Double-Button-1>", self._on_canvas_double)
+        self.canvas.bind("<ButtonPress-2>", self._on_middle_press)
+        self.canvas.bind("<B2-Motion>", self._on_middle_drag)
+        self.canvas.bind("<ButtonRelease-2>", self._on_middle_release)
+        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self.bind_all("<KeyPress-space>", self._on_space_press)
+        self.bind_all("<KeyRelease-space>", self._on_space_release)
         self.bind_all("<Delete>", self._on_delete_key)
         self.bind_all("<BackSpace>", self._on_delete_key)
-
-    def _refresh_toolbar_state(self):
-        pass
 
     # ------------------------------------------------------------------
     # 节点与图操作
     # ------------------------------------------------------------------
     def _add_node(self, node_type: str):
-        x = dpi_scale(120 + len(self.graph.nodes) * 40, self.scale)
-        y = dpi_scale(100 + (len(self.graph.nodes) % 3) * 140, self.scale)
+        # 在画布中心附近添加，避免总是重叠
+        x = self.canvas.canvasx(self.canvas.winfo_width() / 2) / self.zoom
+        y = self.canvas.canvasy(self.canvas.winfo_height() / 2) / self.zoom
+        x += (len(self.graph.nodes) % 5) * 40
+        y += (len(self.graph.nodes) % 3) * 140
         node = self.graph.add_node(node_type, x, y)
         self._init_node_defaults(node)
         self._draw_node(node)
         self._select_node(node.node_id)
         self._set_status(f"添加节点: {node.label}")
+        self._update_minimap()
 
     def _init_node_defaults(self, node: Node):
-        """为新节点填充默认属性。"""
         if node.node_type == "comm":
             node.data.setdefault("protocol", "RS-232")
             node.data.setdefault("address", "COM1")
@@ -184,7 +274,6 @@ class SetupPanel(ttk.Frame):
             self._rebuild_routine_ports(node)
 
     def _rebuild_instrument_ports(self, node: Node):
-        """根据仪器类型重建 instrument 节点端口。"""
         from lab_engine.core.setup_graph import Port
         node.ports = [
             Port("comm", "通信", "input", "comm"),
@@ -192,7 +281,6 @@ class SetupPanel(ttk.Frame):
         ]
 
     def _rebuild_routine_ports(self, node: Node):
-        """根据例程声明重建 routine 节点输入端口。"""
         from lab_engine.core.setup_graph import Port
         routine_name = node.data.get("routine_name", "")
         routine = self.routine_registry.get(routine_name)
@@ -214,52 +302,82 @@ class SetupPanel(ttk.Frame):
             self.selected_node_id = None
             self._clear_property_panel()
         self._redraw_all_edges()
+        self._update_minimap()
 
     def _remove_edge(self, edge_id: str):
         self.graph.remove_edge(edge_id)
         self._erase_edge(edge_id)
+        self._update_minimap()
 
     # ------------------------------------------------------------------
     # Canvas 绘制
     # ------------------------------------------------------------------
+    def _round_rect(self, x1, y1, x2, y2, r=8, **kwargs):
+        """绘制圆角矩形。"""
+        points = [
+            x1 + r, y1,
+            x2 - r, y1,
+            x2, y1,
+            x2, y1 + r,
+            x2, y2 - r,
+            x2, y2,
+            x2 - r, y2,
+            x1 + r, y2,
+            x1, y2,
+            x1, y2 - r,
+            x1, y1 + r,
+            x1, y1,
+        ]
+        return self.canvas.create_polygon(points, smooth=True, **kwargs)
+
+    def _node_size(self, node: Node) -> Tuple[float, float]:
+        """计算节点像素尺寸（未缩放）。"""
+        n_ports = max(2, len(node.ports))
+        w = dpi_scale(NODE_WIDTH, self.scale)
+        h = dpi_scale(max(NODE_HEIGHT, 50 + n_ports * 28), self.scale)
+        return w, h
+
     def _draw_node(self, node: Node):
         self._erase_node(node.node_id)
         items: Dict[str, Any] = {"ports": {}, "labels": []}
 
-        w = dpi_scale(NODE_WIDTH, self.scale)
-        # 根据端口数量调整高度
-        n_ports = max(2, len(node.ports))
-        h = dpi_scale(max(NODE_HEIGHT, 50 + n_ports * 28), self.scale)
+        w, h = self._node_size(node)
+        zw, zh = w * self.zoom, h * self.zoom
+        x, y = node.x * self.zoom, node.y * self.zoom
 
-        # 节点矩形
-        rect = self.canvas.create_rectangle(
-            node.x, node.y, node.x + w, node.y + h,
+        color = NODE_COLORS.get(node.node_type, COLOR_PRIMARY)
+
+        # 节点主体
+        rect = self._round_rect(
+            x, y, x + zw, y + zh, r=dpi_scale(8, self.scale),
             fill=COLOR_CARD, outline="#CBD5E1", width=2,
             tags=(f"node:{node.node_id}", "node"),
         )
         items["rect"] = rect
 
         # 标题背景
-        title_h = dpi_scale(24, self.scale)
-        title_rect = self.canvas.create_rectangle(
-            node.x, node.y, node.x + w, node.y + title_h,
-            fill=COLOR_PRIMARY, outline="",
+        title_h = dpi_scale(24, self.scale) * self.zoom
+        title_rect = self._round_rect(
+            x, y, x + zw, y + title_h, r=dpi_scale(8, self.scale),
+            fill=color, outline="",
             tags=(f"node:{node.node_id}", "node_title_bg"),
         )
         items["title_bg"] = title_rect
 
         # 标题文字
         title_text = self.canvas.create_text(
-            node.x + w / 2, node.y + title_h / 2,
-            text=node.label, fill="white", font=(UI_FONT, 9, "bold"),
+            x + zw / 2, y + title_h / 2,
+            text=node.label, fill="white",
+            font=(UI_FONT, max(7, int(9 * self.zoom)), "bold"),
             tags=(f"node:{node.node_id}", "node_title"),
         )
         items["title"] = title_text
 
         # 类型标签
         type_text = self.canvas.create_text(
-            node.x + w / 2, node.y + h - dpi_scale(10, self.scale),
-            text=node.node_type, fill=COLOR_TEXT_DIM, font=(UI_FONT, 8),
+            x + zw / 2, y + zh - dpi_scale(10, self.scale) * self.zoom,
+            text=node.node_type, fill=COLOR_TEXT_DIM,
+            font=(UI_FONT, max(6, int(8 * self.zoom))),
             tags=(f"node:{node.node_id}", "node_type"),
         )
         items["type_label"] = type_text
@@ -268,34 +386,42 @@ class SetupPanel(ttk.Frame):
         inputs = [p for p in node.ports if p.direction == "input"]
         outputs = [p for p in node.ports if p.direction == "output"]
 
-        for i, port in enumerate(inputs):
+        for port in inputs:
             px, py = self._port_position(node, port, h)
+            px *= self.zoom
+            py *= self.zoom
+            r = PORT_RADIUS * self.zoom
             c = self.canvas.create_oval(
-                px - PORT_RADIUS, py - PORT_RADIUS,
-                px + PORT_RADIUS, py + PORT_RADIUS,
-                fill="#64748B", outline="white", width=2,
+                px - r, py - r, px + r, py + r,
+                fill=PORT_COLORS.get(port.data_type, "#64748B"),
+                outline="white", width=max(1, int(2 * self.zoom)),
                 tags=(f"port:{node.node_id}:{port.name}", "port"),
             )
             items["ports"][port.name] = c
             lbl = self.canvas.create_text(
-                px + dpi_scale(10, self.scale), py,
-                text=port.label, fill=COLOR_TEXT_DIM, font=(UI_FONT, 8),
+                px + dpi_scale(10, self.scale) * self.zoom, py,
+                text=port.label, fill=COLOR_TEXT_DIM,
+                font=(UI_FONT, max(6, int(8 * self.zoom))),
                 anchor=tk.W, tags=(f"port_label:{node.node_id}:{port.name}",),
             )
             items["labels"].append(lbl)
 
-        for i, port in enumerate(outputs):
+        for port in outputs:
             px, py = self._port_position(node, port, h)
+            px *= self.zoom
+            py *= self.zoom
+            r = PORT_RADIUS * self.zoom
             c = self.canvas.create_oval(
-                px - PORT_RADIUS, py - PORT_RADIUS,
-                px + PORT_RADIUS, py + PORT_RADIUS,
-                fill="#64748B", outline="white", width=2,
+                px - r, py - r, px + r, py + r,
+                fill=PORT_COLORS.get(port.data_type, "#64748B"),
+                outline="white", width=max(1, int(2 * self.zoom)),
                 tags=(f"port:{node.node_id}:{port.name}", "port"),
             )
             items["ports"][port.name] = c
             lbl = self.canvas.create_text(
-                px - dpi_scale(10, self.scale), py,
-                text=port.label, fill=COLOR_TEXT_DIM, font=(UI_FONT, 8),
+                px - dpi_scale(10, self.scale) * self.zoom, py,
+                text=port.label, fill=COLOR_TEXT_DIM,
+                font=(UI_FONT, max(6, int(8 * self.zoom))),
                 anchor=tk.E, tags=(f"port_label:{node.node_id}:{port.name}",),
             )
             items["labels"].append(lbl)
@@ -304,11 +430,8 @@ class SetupPanel(ttk.Frame):
         self._update_node_selection_look(node.node_id)
 
     def _port_position(self, node: Node, port: Any, node_h: Optional[float] = None) -> Tuple[float, float]:
-        w = dpi_scale(NODE_WIDTH, self.scale)
-        if node_h is None:
-            n_ports = max(2, len(node.ports))
-            node_h = dpi_scale(max(NODE_HEIGHT, 50 + n_ports * 28), self.scale)
-        h = node_h
+        w, default_h = self._node_size(node)
+        h = node_h if node_h is not None else default_h
         inputs = [p for p in node.ports if p.direction == "input"]
         outputs = [p for p in node.ports if p.direction == "output"]
 
@@ -350,9 +473,18 @@ class SetupPanel(ttk.Frame):
             return
         x1, y1 = self._port_position(src, src_port)
         x2, y2 = self._port_position(dst, dst_port)
+        x1 *= self.zoom
+        y1 *= self.zoom
+        x2 *= self.zoom
+        y2 *= self.zoom
+
+        # 贝塞尔曲线：中点控制点
+        cx = (x1 + x2) / 2
+        color = PORT_COLORS.get(src_port.data_type, COLOR_PRIMARY)
         line = self.canvas.create_line(
-            x1, y1, x2, y2,
-            fill=COLOR_PRIMARY, width=2,
+            x1, y1, cx, y1, cx, y2, x2, y2,
+            fill=color, width=max(1, int(2 * self.zoom)),
+            smooth=True, splinesteps=24,
             tags=(f"edge:{edge_id}", "edge"),
         )
         self._edge_items[edge_id] = line
@@ -375,6 +507,7 @@ class SetupPanel(ttk.Frame):
             return
         self._draw_node(node)
         self._redraw_all_edges()
+        self._update_minimap()
 
     def _update_node_selection_look(self, node_id: str):
         items = self._node_items.get(node_id)
@@ -383,16 +516,46 @@ class SetupPanel(ttk.Frame):
         rect = items.get("rect")
         if rect is None:
             return
-        color = COLOR_PRIMARY if self.selected_node_id == node_id else "#CBD5E1"
-        self.canvas.itemconfigure(rect, outline=color)
-        self.canvas.itemconfigure(rect, width=3 if self.selected_node_id == node_id else 2)
+        if self.selected_node_id == node_id:
+            color = NODE_COLORS.get(self.graph.get_node(node_id).node_type, COLOR_PRIMARY)
+            self.canvas.itemconfigure(rect, outline=color)
+            self.canvas.itemconfigure(rect, width=max(2, int(3 * self.zoom)))
+        else:
+            self.canvas.itemconfigure(rect, outline="#CBD5E1")
+            self.canvas.itemconfigure(rect, width=max(1, int(2 * self.zoom)))
+
+    def _update_minimap(self):
+        """更新小地图。"""
+        # 简化：在小地图上画节点矩形
+        self.minimap.delete("all")
+        if not self.graph.nodes:
+            return
+        xs = [n.x for n in self.graph.nodes.values()]
+        ys = [n.y for n in self.graph.nodes.values()]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        span_x = max(max_x - min_x, 1)
+        span_y = max(max_y - min_y, 1)
+        w = self.minimap.winfo_width() or dpi_scale(160, self.scale)
+        h = self.minimap.winfo_height() or dpi_scale(120, self.scale)
+        for node in self.graph.nodes.values():
+            nx = (node.x - min_x) / span_x * w
+            ny = (node.y - min_y) / span_y * h
+            nw = max(4, dpi_scale(NODE_WIDTH, self.scale) / span_x * w)
+            nh = max(3, dpi_scale(NODE_HEIGHT, self.scale) / span_y * h)
+            self.minimap.create_rectangle(
+                nx, ny, nx + nw, ny + nh,
+                fill=NODE_COLORS.get(node.node_type, COLOR_PRIMARY),
+                outline="",
+            )
 
     # ------------------------------------------------------------------
     # 鼠标交互
     # ------------------------------------------------------------------
     def _hit_test(self, x: float, y: float):
-        """返回命中的对象信息。"""
-        items = self.canvas.find_overlapping(x - 2, y - 2, x + 2, y + 2)
+        """返回命中的对象信息（x, y 为画布坐标，已除以 zoom）。"""
+        sx, sy = x * self.zoom, y * self.zoom
+        items = self.canvas.find_overlapping(sx - 2, sy - 2, sx + 2, sy + 2)
         for item in reversed(items):
             tags = self.canvas.gettags(item)
             for tag in tags:
@@ -402,17 +565,21 @@ class SetupPanel(ttk.Frame):
                 if tag.startswith("node:"):
                     _, node_id = tag.split(":")
                     return "node", node_id, None
-                if tag == "node":
-                    # 找到最近的 node tag
-                    for t in tags:
-                        if t.startswith("node:"):
-                            _, node_id = t.split(":")
-                            return "node", node_id, None
         return None, None, None
 
+    def _canvas_to_graph(self, x: float, y: float) -> Tuple[float, float]:
+        """把画布屏幕坐标转换为图坐标。"""
+        return self.canvas.canvasx(x) / self.zoom, self.canvas.canvasy(y) / self.zoom
+
     def _on_canvas_press(self, event):
-        x, y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+        x, y = self._canvas_to_graph(event.x, event.y)
         kind, node_id, port_name = self._hit_test(x, y)
+
+        if self._space_pressed:
+            self._panning = True
+            self.pan_start = (event.x, event.y)
+            self.canvas.config(cursor="fleur")
+            return
 
         if kind == "port":
             self._edge_start = (node_id, port_name)
@@ -425,7 +592,16 @@ class SetupPanel(ttk.Frame):
             self._select_node(None)
 
     def _on_canvas_drag(self, event):
-        x, y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+        x, y = self._canvas_to_graph(event.x, event.y)
+
+        if self._panning:
+            if self.pan_start is not None:
+                dx = event.x - self.pan_start[0]
+                dy = event.y - self.pan_start[1]
+                self.canvas.xview_scroll(int(-dx / self.zoom), "units")
+                self.canvas.yview_scroll(int(-dy / self.zoom), "units")
+                self.pan_start = (event.x, event.y)
+            return
 
         if self._edge_start is not None:
             self._draw_temp_edge(x, y)
@@ -436,11 +612,21 @@ class SetupPanel(ttk.Frame):
             if node:
                 node.x += dx
                 node.y += dy
+                # 网格吸附
+                grid = GRID_SIZE * self.scale
+                node.x = round(node.x / grid) * grid
+                node.y = round(node.y / grid) * grid
                 self._drag_start = (x, y)
                 self._redraw_node(self._drag_node_id)
 
     def _on_canvas_release(self, event):
-        x, y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+        x, y = self._canvas_to_graph(event.x, event.y)
+
+        if self._panning:
+            self._panning = False
+            self.pan_start = None
+            self.canvas.config(cursor="")
+            return
 
         if self._edge_start is not None:
             self._clear_temp_edge()
@@ -451,6 +637,7 @@ class SetupPanel(ttk.Frame):
                 if edge:
                     self._draw_edge(edge.edge_id)
                     self._set_status("已创建连线")
+                    self._update_minimap()
                 else:
                     self._set_status("连线无效")
             self._edge_start = None
@@ -458,25 +645,45 @@ class SetupPanel(ttk.Frame):
             self._drag_node_id = None
             self._drag_start = None
 
+    def _on_middle_press(self, event):
+        self._panning = True
+        self.pan_start = (event.x, event.y)
+        self.canvas.config(cursor="fleur")
+
+    def _on_middle_drag(self, event):
+        if self._panning and self.pan_start is not None:
+            dx = event.x - self.pan_start[0]
+            dy = event.y - self.pan_start[1]
+            self.canvas.xview_scroll(int(-dx / self.zoom), "units")
+            self.canvas.yview_scroll(int(-dy / self.zoom), "units")
+            self.pan_start = (event.x, event.y)
+
+    def _on_middle_release(self, event):
+        self._panning = False
+        self.pan_start = None
+        self.canvas.config(cursor="")
+
+    def _on_mousewheel(self, event):
+        if event.state & 0x0004:  # Ctrl
+            factor = 1.1 if event.delta > 0 else 0.9
+            old_zoom = self.zoom
+            self.zoom *= factor
+            self.zoom = max(0.3, min(3.0, self.zoom))
+            if self.zoom != old_zoom:
+                self._redraw_all()
+                self._set_status(f"缩放: {self.zoom:.2f}x")
+
+    def _on_space_press(self, _event):
+        self._space_pressed = True
+
+    def _on_space_release(self, _event):
+        self._space_pressed = False
+        self._panning = False
+        self.pan_start = None
+        self.canvas.config(cursor="")
+
     def _on_canvas_double(self, event):
         pass
-
-    def _draw_temp_edge(self, x2: float, y2: float):
-        self._clear_temp_edge()
-        src_id, src_port_name = self._edge_start
-        src = self.graph.get_node(src_id)
-        src_port = src.port(src_port_name) if src else None
-        if src is None or src_port is None:
-            return
-        x1, y1 = self._port_position(src, src_port)
-        self._temp_edge_line = self.canvas.create_line(
-            x1, y1, x2, y2, fill="#94A3B8", width=2, dash=(4, 4), tags=("temp_edge",)
-        )
-
-    def _clear_temp_edge(self):
-        if self._temp_edge_line is not None:
-            self.canvas.delete(self._temp_edge_line)
-            self._temp_edge_line = None
 
     def _on_delete_key(self, _event):
         if self.selected_node_id:
@@ -493,6 +700,49 @@ class SetupPanel(ttk.Frame):
             self._build_property_panel()
         else:
             self._clear_property_panel()
+
+    # ------------------------------------------------------------------
+    # 临时连线
+    # ------------------------------------------------------------------
+    def _draw_temp_edge(self, x2: float, y2: float):
+        self._clear_temp_edge()
+        src_id, src_port_name = self._edge_start
+        src = self.graph.get_node(src_id)
+        src_port = src.port(src_port_name) if src else None
+        if src is None or src_port is None:
+            return
+        x1, y1 = self._port_position(src, src_port)
+        x1 *= self.zoom
+        y1 *= self.zoom
+        x2 *= self.zoom
+        y2 *= self.zoom
+        cx = (x1 + x2) / 2
+        self._temp_edge_line = self.canvas.create_line(
+            x1, y1, cx, y1, cx, y2, x2, y2,
+            fill="#94A3B8", width=max(1, int(2 * self.zoom)),
+            smooth=True, splinesteps=24, dash=(4, 4),
+            tags=("temp_edge",),
+        )
+
+    def _clear_temp_edge(self):
+        if self._temp_edge_line is not None:
+            self.canvas.delete(self._temp_edge_line)
+            self._temp_edge_line = None
+
+    # ------------------------------------------------------------------
+    # 画布重绘
+    # ------------------------------------------------------------------
+    def _redraw_all(self):
+        """缩放或全量刷新。"""
+        self.canvas.delete("all")
+        self._node_items.clear()
+        self._edge_items.clear()
+        self._grid_items.clear()
+        self._draw_grid()
+        for node in self.graph.nodes.values():
+            self._draw_node(node)
+        self._redraw_all_edges()
+        self._update_minimap()
 
     # ------------------------------------------------------------------
     # 属性面板
@@ -523,7 +773,6 @@ class SetupPanel(ttk.Frame):
         elif node.node_type == "instrument":
             self._add_prop_choice(node, "instrument_key", "仪器类型", InstrumentRegistry.keys())
             self._add_prop_entry(node, "alias", "别名", node.data.get("alias", ""))
-            # 根据仪器类型渲染连接参数
             meta = InstrumentRegistry.get(node.data.get("instrument_key", ""))
             if meta:
                 for p in meta.connection_params:
@@ -589,17 +838,14 @@ class SetupPanel(ttk.Frame):
         old_value = node.data.get(key)
         node.data[key] = value
 
-        # 特殊处理：标签
         if key == "label":
             node.label = value or _default_label(node.node_type)
             self._redraw_node(node.node_id)
 
-        # 特殊处理：instrument 类型改变 -> 保留 alias，不需要改端口
         if key == "instrument_key":
             self._rebuild_instrument_ports(node)
             self._redraw_node(node.node_id)
 
-        # 特殊处理：routine 改变 -> 重建端口
         if key == "routine_name":
             self._rebuild_routine_ports(node)
             self._redraw_node(node.node_id)
@@ -616,13 +862,8 @@ class SetupPanel(ttk.Frame):
     def set_graph(self, graph: SetupGraph):
         self.graph = graph
         self.selected_node_id = None
-        self._node_items.clear()
-        self._edge_items.clear()
-        self.canvas.delete("all")
-        for node in self.graph.nodes.values():
-            self._init_node_defaults(node)
-            self._draw_node(node)
-        self._redraw_all_edges()
+        self.zoom = 1.0
+        self._redraw_all()
         self._clear_property_panel()
         self._set_status("已加载 Setup 图")
 
