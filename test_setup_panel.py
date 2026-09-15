@@ -16,7 +16,12 @@ root = tk.Tk()
 root.title("Setup Panel Test")
 scale = set_tk_scaling(root)
 setup_plot_fonts()
-root.geometry("1200x800")
+
+# 根据屏幕尺寸设置窗口大小
+sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+w = min(int(sw * 0.9), 1600)
+h = min(int(sh * 0.9), 1000)
+root.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
 
 registry = RoutineRegistry()
 registry.discover([Path(__file__).resolve().parent / "lab_engine" / "routines"])

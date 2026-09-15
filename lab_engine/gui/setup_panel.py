@@ -695,7 +695,7 @@ class SetupPanel(ttk.Frame):
 
         if self._space_pressed:
             self._panning = True
-            self.pan_start = (event.x, event.y)
+            self.canvas.scan_mark(event.x, event.y)
             self.canvas.config(cursor="fleur")
             return
 
@@ -714,12 +714,7 @@ class SetupPanel(ttk.Frame):
         x, y = self._canvas_to_graph(event.x, event.y)
 
         if self._panning:
-            if self.pan_start is not None:
-                dx = event.x - self.pan_start[0]
-                dy = event.y - self.pan_start[1]
-                self.canvas.xview_scroll(int(-dx / self.zoom), "units")
-                self.canvas.yview_scroll(int(-dy / self.zoom), "units")
-                self.pan_start = (event.x, event.y)
+            self.canvas.scan_dragto(event.x, event.y, gain=1)
             return
 
         if self._edge_start is not None:
@@ -742,7 +737,6 @@ class SetupPanel(ttk.Frame):
 
         if self._panning:
             self._panning = False
-            self.pan_start = None
             self.canvas.config(cursor="")
             return
 
@@ -766,20 +760,15 @@ class SetupPanel(ttk.Frame):
 
     def _on_middle_press(self, event):
         self._panning = True
-        self.pan_start = (event.x, event.y)
+        self.canvas.scan_mark(event.x, event.y)
         self.canvas.config(cursor="fleur")
 
     def _on_middle_drag(self, event):
-        if self._panning and self.pan_start is not None:
-            dx = event.x - self.pan_start[0]
-            dy = event.y - self.pan_start[1]
-            self.canvas.xview_scroll(int(-dx / self.zoom), "units")
-            self.canvas.yview_scroll(int(-dy / self.zoom), "units")
-            self.pan_start = (event.x, event.y)
+        if self._panning:
+            self.canvas.scan_dragto(event.x, event.y, gain=1)
 
     def _on_middle_release(self, event):
         self._panning = False
-        self.pan_start = None
         self.canvas.config(cursor="")
 
     def _on_mousewheel(self, event):
