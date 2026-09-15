@@ -102,13 +102,80 @@ python examples/k2400_gpd4303s_routine_gui.py
 即可按自定义参数执行多仪器联动测试（如 GPD 提供偏置、K2400 执行 IV 扫描）。
 运行过程中实时绘制 I-V 曲线，测试结束后自动保存 CSV 与 JSON 元数据。
 
+### 9. Lab Engine（通用仪器引擎，实验性）
+
+```bash
+python lab_engine_app.py
+# 或
+python -m lab_engine
+```
+
+Lab Engine 是 IVLab 向“插件化实验平台”演进的第一步。它提供一个统一的 GUI 外壳：
+
+- 自动按例程声明渲染仪器连接面板
+- 自动按例程声明渲染参数面板
+- 后台线程运行例程，实时显示日志、进度和曲线
+- 每次运行自动生成 `data/<run_id>/data.csv` 与 `metadata.json`
+
+Phase 1 内置例程：
+
+- `lab_engine/routines/bias_iv_sweep.py`：GPD CH1 提供偏置，K2400 执行 IV 扫描
+
+后续通信系统（DMT 流程、网格扫描等）将以“通信例程套件”形式接入同一引擎。
+
+#### 例程插件接口
+
+一个例程就是一个普通 `.py` 文件，放在 `lab_engine/routines/` 或未来配置的用户目录中：
+
+```python
+NAME = "偏置 IV 扫描"
+DESCRIPTION = "GPD CH1 提供 DUT 直流偏置，K2400 执行 IV 扫描"
+ICON = "⚡"
+
+INSTRUMENTS = {
+    "k2400": {"type": "keithley2400", "required": True},
+    "gpd": {"type": "gpd4303s", "required": True},
+}
+
+PARAMS = [
+    {"name": "bias_v", "label": "偏置电压 (V)", "type": "float",
+     "default": 3.3, "min": 0.0, "max": 32.0},
+    {"name": "start_v", "label": "起始电压 (V)", "type": "float",
+     "default": -1.0, "min": -200.0, "max": 200.0},
+    # ...
+]
+
+def run(instruments, params, context):
+    k2400 = instruments["k2400"]
+    gpd = instruments["gpd"]
+
+    context.log("开始扫描...")
+    gpd.set_voltage(1, params["bias_v"])
+    gpd.output_on()
+
+    for v, i in scan_loop(k2400, params):
+        context.point(voltage=v, current=i)
+        if context.is_stopped():
+            break
+
+    context.done(success=True)
+```
+
+`context` 提供：
+
+- `context.log(text, level="info")`：写入日志面板
+- `context.progress(current, total)`：更新进度条
+- `context.point(**kwargs)`：实时数据点（自动绘图）
+- `context.data(**kwargs)`：最终聚合数据
+- `context.is_stopped()`：检查用户是否点击停止
+
 ---
 
 ## 项目结构
 
 ```
 RS-232_lab_device-main/          # 项目根目录
-├── ivlab/                       # Python 包
+├── ivlab/                       # 仪器驱动与扫描库
 │   ├── core/                    # 核心基础设施
 │   │   ├── exceptions.py        # 自定义异常类
 │   │   ├── config.py            # ScanConfig / InstrumentConfig
@@ -138,6 +205,23 @@ RS-232_lab_device-main/          # 项目根目录
 │   │   └── data_handler.py      # CSV / JSON 数据保存
 │   └── utils/
 │       └── port_scanner.py      # COM 口自动扫描
+├── lab_engine/                  # 通用实验室仪器引擎（Phase 1）
+│   ├── app.py                   # LabEngineApp 主窗口
+│   ├── __main__.py              # python -m lab_engine
+│   ├── core/                    # 引擎核心
+│   │   ├── registry.py          # InstrumentRegistry / RoutineRegistry
+│   │   ├── routine_context.py   # 例程运行时上下文
+│   │   └── data_manager.py      # run_id / CSV / JSON 保存
+│   ├── gui/                     # GUI 组件
+│   │   ├── shell.py             # DPI / 主题 / 字体
+│   │   ├── connection_panel.py  # 自动仪器连接面板
+│   │   ├── routine_panel.py     # 例程参数面板
+│   │   ├── plot_panel.py        # 实时曲线
+│   │   └── log_panel.py         # 日志面板
+│   ├── instruments/             # 仪器注册（复用 ivlab 驱动）
+│   │   └── __init__.py
+│   └── routines/                # 内置例程插件
+│       └── bias_iv_sweep.py     # GPD 偏置 + K2400 IV 扫描
 ├── examples/                    # 示例脚本（可直接运行）
 │   ├── basic_iv_scan.py         # 基础扫描示例
 │   ├── hysteresis_scan.py       # 回滞分析示例
@@ -146,9 +230,10 @@ RS-232_lab_device-main/          # 项目根目录
 │   ├── sva1032x_demo.py         # SVA1032X 频谱仪示例
 │   ├── gpd4303s_demo.py         # GPD-4303S 电源 USB-B 示例
 │   ├── gpd4303s_gui.py          # GPD-4303S 图形化监控面板
-│   ├── k2400_gpd4303s_routine_gui.py  # K2400 + GPD4303S 联合测试例程 GUI
-│   └── routines/                # 可导入的测试例程插件目录
+│   ├── k2400_gpd4303s_routine_gui.py  # K2400 + GPD4303S 联合测试例程 GUI（旧原型）
+│   └── routines/                # 可导入的测试例程插件目录（旧原型）
 │       └── bias_iv_sweep.py     # 示例：GPD 偏置 + K2400 IV 扫描
+├── lab_engine_app.py            # 引擎启动入口
 ├── README.md
 ├── CHANGELOG.md
 └── requirements.txt

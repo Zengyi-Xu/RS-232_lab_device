@@ -1,5 +1,25 @@
 # 更新日志
 
+## 2026-09-16
+
+### 新增
+
+- **Lab Engine 通用仪器引擎（Phase 1）**：新增 `lab_engine/` 包与根目录启动入口
+  `lab_engine_app.py`，提供可插例程的通用 GUI 外壳。
+  - 自动发现 `lab_engine/routines/` 下的 `.py` 例程插件。
+  - 按例程声明的 `INSTRUMENTS` 自动渲染仪器连接面板。
+  - 按例程声明的 `PARAMS` 自动渲染参数面板（支持 float/int/choice/bool）。
+  - 后台线程运行例程，实时显示日志、进度条和 I-V 曲线。
+  - 每次运行自动生成 `data/<run_id>/data.csv` 与 `metadata.json`。
+  - 内置首个例程 `lab_engine/routines/bias_iv_sweep.py`（GPD 偏置 + K2400 IV 扫描）。
+- **GPD-4303S 驱动补全**：新增 `ivlab/instruments/gpd4303s.py`，使 `ivlab` 仪器包完整
+  支持 GPD-4303S 四通道直流电源，为 Lab Engine 提供底层驱动。
+
+### 改进
+
+- **修复 `ivlab/instruments/__init__.py`**：移除对不存在模块的引用，使 `ivlab` 包可正常导入。
+- **README / CHANGELOG 更新**：新增 Lab Engine 快速开始、例程插件接口规范与项目结构说明。
+
 ## 2026-09-14
 
 ### 新增
