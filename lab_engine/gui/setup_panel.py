@@ -234,15 +234,15 @@ class SetupPanel(ttk.Frame):
         line_h = self._to_screen_scalar(18)
         for i, line in enumerate(help_lines):
             if i == 0:
-                font = (UI_FONT, max(8, int(10 * self.zoom * self.scale)), "bold")
+                font = (UI_FONT, max(8, int(10 * self.scale)), "bold")
                 fill = COLOR_PRIMARY
             elif line == "":
                 continue
             elif line.startswith("  "):
-                font = (UI_FONT, max(6, int(8 * self.zoom * self.scale)))
+                font = (UI_FONT, max(6, int(8 * self.scale)))
                 fill = COLOR_TEXT_DIM
             else:
-                font = (UI_FONT, max(6, int(9 * self.zoom * self.scale)))
+                font = (UI_FONT, max(6, int(9 * self.scale)))
                 fill = "#475569"
             self.canvas.create_text(
                 x, y + i * line_h,
@@ -422,7 +422,7 @@ class SetupPanel(ttk.Frame):
         title_text = self.canvas.create_text(
             x + zw / 2, y + title_h / 2,
             text=node.label, fill="white",
-            font=(UI_FONT, max(7, int(9 * self.zoom * self.scale)), "bold"),
+            font=(UI_FONT, max(7, int(9 * self.scale)), "bold"),
             tags=(f"node:{node.node_id}", "node_title"),
         )
         items["title"] = title_text
@@ -431,7 +431,7 @@ class SetupPanel(ttk.Frame):
         type_text = self.canvas.create_text(
             x + zw / 2, y + zh - self._to_screen_scalar(10),
             text=node.node_type, fill=COLOR_TEXT_DIM,
-            font=(UI_FONT, max(6, int(8 * self.zoom * self.scale))),
+            font=(UI_FONT, max(6, int(8 * self.scale))),
             tags=(f"node:{node.node_id}", "node_type"),
         )
         items["type_label"] = type_text
@@ -454,7 +454,7 @@ class SetupPanel(ttk.Frame):
             lbl = self.canvas.create_text(
                 px + self._to_screen_scalar(10), py,
                 text=port.label, fill=COLOR_TEXT_DIM,
-                font=(UI_FONT, max(6, int(8 * self.zoom * self.scale))),
+                font=(UI_FONT, max(6, int(8 * self.scale))),
                 anchor=tk.W, tags=(f"port_label:{node.node_id}:{port.name}",),
             )
             items["labels"].append(lbl)
@@ -473,7 +473,7 @@ class SetupPanel(ttk.Frame):
             lbl = self.canvas.create_text(
                 px - self._to_screen_scalar(10), py,
                 text=port.label, fill=COLOR_TEXT_DIM,
-                font=(UI_FONT, max(6, int(8 * self.zoom * self.scale))),
+                font=(UI_FONT, max(6, int(8 * self.scale))),
                 anchor=tk.E, tags=(f"port_label:{node.node_id}:{port.name}",),
             )
             items["labels"].append(lbl)
