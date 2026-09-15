@@ -22,6 +22,11 @@ class SCPIMixin:
     _source_mode: str = "voltage"
     _measure_func: str = "current"
 
+    @staticmethod
+    def _func_to_scpi(func: str) -> str:
+        """把内部 'current'/'voltage' 映射为 Keithley 接受的短格式 'CURR'/'VOLT'."""
+        return {"current": "CURR", "voltage": "VOLT"}.get(func.lower(), func.upper())
+
     def _post_connect(self):
         """连接后清空缓冲区并查询 IDN"""
         idn = self.idn()
@@ -43,7 +48,11 @@ class SCPIMixin:
             self._measure_func = "voltage"
         else:
             raise ConfigurationError(f"不支持的源模式: {mode}")
-        self.write(f':SENS:FUNC "{self._measure_func.upper()}"')
+        scpi_source = self._func_to_scpi(mode)
+        # 先打开源量程自动，避免后面设源电平超出当前固定量程；再关闭并发测量并选单功能
+        self.write(f":SOUR:{scpi_source}:RANG:AUTO ON")
+        self.write(":SENS:FUNC:CONC OFF")
+        self.write(f':SENS:FUNC "{self._func_to_scpi(self._measure_func)}"')
         self.logger.debug(f"[{self.model}] 源模式设为 {mode}")
 
     def set_compliance(self, value: float):

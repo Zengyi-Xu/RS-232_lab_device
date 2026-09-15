@@ -39,7 +39,7 @@ class IVScanner:
         inst.reset()
         time.sleep(0.3)
 
-        # 设置源模式
+        # 设置源模式（内部会自动打开源量程自动、关闭并发测量并选择互补测功能）
         inst.set_source_mode(cfg.source_mode)
         time.sleep(0.1)
 
@@ -48,18 +48,24 @@ class IVScanner:
             measure_func = "current" if cfg.source_mode == "voltage" else "voltage"
             inst.set_measure_function(measure_func)
 
+        # 先设置量程（自动或固定），再设置合规限值；
+        # 否则在固定小量程下设置大合规值会触发 -221 Settings conflict
+        inst.set_range(cfg.auto_range, cfg.fixed_range)
+
         # 设置合规限值
         inst.set_compliance(cfg.compliance_i)
 
         # 设置NPLC
         inst.set_nplc(cfg.nplc)
 
-        # 设置量程
-        inst.set_range(cfg.auto_range, cfg.fixed_range)
-
         # 设置源延迟
         if hasattr(inst, "set_source_delay"):
             inst.set_source_delay(cfg.source_delay)
+
+        # 清掉配置过程中可能产生的任何单条 warning，避免污染后续查询
+        errs = inst.check_errors() if hasattr(inst, "check_errors") else []
+        if errs:
+            self.logger.warning(f"仪器配置后错误队列: {errs}")
 
         self.logger.info(f"仪器配置完成: {cfg.source_mode}源, NPLC={cfg.nplc}, "
                         f"合规={cfg.compliance_i}A, 量程自动={cfg.auto_range}")

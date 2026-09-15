@@ -171,6 +171,8 @@ class RoutineWorker(threading.Thread):
             _, inst_name = cmd
             self._disconnect_instrument(inst_name)
         elif cmd[0] == "disconnect_all":
+            # 先停例程再断开，避免在扫描过程中直接拔掉端口导致锁死
+            self._stop_event.set()
             self._disconnect_all()
         elif cmd[0] == "run_routine":
             _, module_path, params = cmd
@@ -515,6 +517,8 @@ class K2400GPDRoutineApp(tk.Tk):
         self.run_btn.pack(side=tk.LEFT, padx=(0, 8))
         self.stop_btn = ttk.Button(btn_frame, text="■ 停止", command=self._stop_routine, state=tk.DISABLED)
         self.stop_btn.pack(side=tk.LEFT, padx=(0, 8))
+        self.disconnect_btn = ttk.Button(btn_frame, text="⏻ 断开所有仪器", command=self._disconnect_all_instruments)
+        self.disconnect_btn.pack(side=tk.LEFT, padx=(0, 8))
 
         self.progress_var = tk.DoubleVar(value=0.0)
         self.progress_bar = ttk.Progressbar(cf, variable=self.progress_var, maximum=100.0, length=300)
@@ -714,6 +718,11 @@ class K2400GPDRoutineApp(tk.Tk):
     def _stop_routine(self):
         self.cmd_queue.put(("stop_routine",))
         self._log("已请求停止例程", "warn")
+
+    def _disconnect_all_instruments(self):
+        """一键断开所有仪器，释放串口占用。"""
+        self.cmd_queue.put(("disconnect_all",))
+        self._log("已请求断开所有仪器", "warn")
 
     def _browse_output_dir(self):
         path = filedialog.askdirectory(title="选择输出目录", initialdir=self.output_dir_var.get())
