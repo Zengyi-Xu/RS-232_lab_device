@@ -110,23 +110,22 @@ python lab_engine_app.py
 python -m lab_engine
 ```
 
-Lab Engine 是 IVLab 向“插件化实验平台”演进的第一步。它提供一个统一的 GUI 外壳，
-主界面分为 **Setup 框图** 与 **Run 运行** 两个 tab：
+Lab Engine 是 IVLab 向“插件化实验平台”演进的第一步。它提供一个统一的 GUI 外壳：
 
-- **Setup tab**：可视化节点编辑器，低代码搭建实验系统。
-  - 节点：上位机（Host）、通信接口（Comm）、仪器（Instrument）、例程（Routine）。
-  - 拖拽添加节点，鼠标在端口间连线，Delete 删除。
-  - 保存/加载 `*.labsetup.json`。
-  - 点击“应用到运行配置”把框图同步到 Run tab。
-- **Run tab**：
-  - 自动按例程声明渲染仪器连接面板
-  - 自动按例程声明渲染参数面板
-  - 后台线程运行例程，实时显示日志、进度和曲线
-  - 每次运行自动生成 `data/<run_id>/data.csv` 与 `metadata.json`
+- 自动按例程声明渲染仪器连接面板
+- 自动按例程声明渲染参数面板
+- 后台线程运行例程，实时显示日志、进度和曲线
+- 每次运行自动生成 `data/<run_id>/data.csv` 与 `metadata.json`
 
 Phase 1 内置例程：
 
 - `lab_engine/routines/bias_iv_sweep.py`：GPD CH1 提供偏置，K2400 执行 IV 扫描
+
+> **Setup 框图（实验性，已暂缓）**：`lab_engine/core/setup_graph.py` 与
+> `lab_engine/gui/setup_panel.py` 已经实现了一个可视化节点编辑器的原型，支持
+> Host / Comm / Instrument / Routine 四种节点以及保存/加载 `*.labsetup.json`。
+> 由于节点关系与交互方式还需要进一步设计，该功能暂时**没有挂载到主界面**，
+> 代码保留在仓库中，待后续重新激活。
 
 后续通信系统（DMT 流程、网格扫描等）将以“通信例程套件”形式接入同一引擎。
 

@@ -8,14 +8,12 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Any, Dict, Optional
 
 from lab_engine.core.data_manager import DataManager
-from lab_engine.core.registry import InstrumentRegistry, RoutineMeta, RoutineRegistry
+from lab_engine.core.registry import RoutineMeta, RoutineRegistry
 from lab_engine.core.routine_context import RoutineContext
-from lab_engine.core.setup_graph import SetupGraph
 from lab_engine.gui.connection_panel import ConnectionPanel
 from lab_engine.gui.log_panel import LogPanel
 from lab_engine.gui.plot_panel import PlotPanel
 from lab_engine.gui.routine_panel import RoutinePanel
-from lab_engine.gui.setup_panel import SetupPanel
 from lab_engine.gui.shell import (
     COLOR_BG,
     COLOR_CARD,
@@ -114,31 +112,9 @@ class LabEngineApp(tk.Tk):
         self.status_lbl = ttk.Label(header, text="就绪")
         self.status_lbl.pack(side=tk.RIGHT)
 
-        # 主 Notebook：Setup / Run
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 8))
-
-        setup_tab = tk.Frame(self.notebook, bg=COLOR_BG)
-        run_tab = tk.Frame(self.notebook, bg=COLOR_BG)
-        self.notebook.add(setup_tab, text="  Setup 框图  ")
-        self.notebook.add(run_tab, text="  Run 运行  ")
-
-        # ---- Setup tab ----
-        self.setup_panel = SetupPanel(
-            setup_tab,
-            routine_registry=self.registry,
-            on_apply=self._apply_setup_graph,
-            scale=self.scale,
-        )
-        self.setup_panel.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-
-        # ---- Run tab ----
-        self._build_run_tab(run_tab)
-
-    def _build_run_tab(self, parent):
         # 主区域：左侧可滚动面板 + 右侧图/日志
-        main_paned = ttk.PanedWindow(parent, orient=tk.HORIZONTAL)
-        main_paned.pack(fill=tk.BOTH, expand=True)
+        main_paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
+        main_paned.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 8))
 
         # 先创建右侧面板，使 plot_panel / log_panel 在例程触发 on_select 前已存在
         right = tk.Frame(main_paned, bg=COLOR_BG)
@@ -195,80 +171,6 @@ class LabEngineApp(tk.Tk):
 
         main_paned.add(left_frame, weight=1)
         main_paned.add(right, weight=2)
-
-    def _apply_setup_graph(self, graph: SetupGraph):
-        """把 Setup 图同步到 Run tab 的连接面板与例程面板。"""
-        # 1. 收集 instrument 节点 -> 例程期望的 instruments 字典
-        instruments_meta: Dict[str, Dict[str, Any]] = {}
-        for node in graph.nodes_by_type("instrument"):
-            alias = node.data.get("alias") or node.node_id
-            key = node.data.get("instrument_key", "")
-            instruments_meta[alias] = {"type": key, "required": True}
-
-        # 2. 选择例程：取第一个 routine 节点
-        routine_nodes = graph.nodes_by_type("routine")
-        if routine_nodes:
-            routine_name = routine_nodes[0].data.get("routine_name", "")
-            if routine_name and routine_name in self.registry.names():
-                self.routine_panel.select_routine(routine_name)
-
-        # 3. 应用仪器配置（如果当前例程已选，以例程声明为准；否则以图里的 instrument 节点为准）
-        current_routine = self.routine_panel.current_routine
-        if current_routine:
-            # 合并：例程声明的仪器 + 图中同名 instrument 节点的类型/参数
-            merged = dict(current_routine.instruments)
-            for alias, info in instruments_meta.items():
-                if alias in merged:
-                    merged[alias]["type"] = info["type"]
-                else:
-                    merged[alias] = info
-            self.connection_panel.set_instruments(merged)
-        elif instruments_meta:
-            self.connection_panel.set_instruments(instruments_meta)
-
-        # 4. 把图中每个 instrument 节点的连接参数写回对应卡片
-        for node in graph.nodes_by_type("instrument"):
-            alias = node.data.get("alias") or node.node_id
-            card = self.connection_panel.cards.get(alias)
-            if card is None:
-                continue
-            meta = InstrumentRegistry.get(node.data.get("instrument_key", ""))
-            if meta is None:
-                continue
-            for p in meta.connection_params:
-                name = p["name"]
-                if name in card.param_vars:
-                    value = node.data.get(name)
-                    if value is not None:
-                        card.param_vars[name].set(str(value))
-
-        # 5. 把 routine 节点的参数写回例程面板
-        if routine_nodes and self.routine_panel.current_routine:
-            routine_node = routine_nodes[0]
-            for p in self.routine_panel.current_routine.params:
-                name = p["name"]
-                if name not in self.routine_panel.param_vars:
-                    continue
-                value = routine_node.data.get(name)
-                if value is None:
-                    continue
-                ptype = p.get("type", "")
-                try:
-                    if ptype == "bool":
-                        value = bool(value)
-                    elif ptype == "int":
-                        value = int(value)
-                    elif ptype == "float":
-                        value = float(value)
-                    else:
-                        value = str(value)
-                    self.routine_panel.param_vars[name].set(value)
-                except Exception:
-                    pass
-
-        # 6. 切换到 Run tab
-        self.notebook.select(1)
-        self.log_panel.append("已从 Setup 框图同步运行配置")
 
     def _browse_output_dir(self):
         path = filedialog.askdirectory(title="选择输出目录", initialdir=self.output_dir_var.get())

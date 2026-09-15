@@ -305,7 +305,10 @@ class SetupPanel(ttk.Frame):
 
     def _port_position(self, node: Node, port: Any, node_h: Optional[float] = None) -> Tuple[float, float]:
         w = dpi_scale(NODE_WIDTH, self.scale)
-        h = node_h or dpi_scale(NODE_HEIGHT, self.scale)
+        if node_h is None:
+            n_ports = max(2, len(node.ports))
+            node_h = dpi_scale(max(NODE_HEIGHT, 50 + n_ports * 28), self.scale)
+        h = node_h
         inputs = [p for p in node.ports if p.direction == "input"]
         outputs = [p for p in node.ports if p.direction == "output"]
 
@@ -495,7 +498,7 @@ class SetupPanel(ttk.Frame):
     # 属性面板
     # ------------------------------------------------------------------
     def _clear_property_panel(self):
-        for w in self._prop_widgets:
+        for w in self.prop_frame.winfo_children():
             w.destroy()
         self._prop_widgets.clear()
         self._prop_vars.clear()

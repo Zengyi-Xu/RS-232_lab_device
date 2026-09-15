@@ -4,18 +4,17 @@
 
 ### 新增
 
-- **Lab Engine Setup 框图（Phase 2）**：主界面新增 **Setup** tab，提供可视化节点编辑器。
+- **Lab Engine Setup 框图（Phase 2，实验性，暂缓）**：新增可视化节点编辑器原型。
   - 节点类型：上位机（Host）、通信接口（Comm）、仪器（Instrument）、例程（Routine）。
   - 支持拖拽添加节点、鼠标连线、选中编辑属性、Delete 删除。
   - Setup 图可保存/加载为 `*.labsetup.json`。
-  - 点击“应用到运行配置”可一键把框图同步到 **Run** tab 的仪器连接与例程选择。
   - 新增数据模型 `lab_engine/core/setup_graph.py` 与编辑器 `lab_engine/gui/setup_panel.py`。
   - 提供示例：`examples/setups/bias_iv_setup.labsetup.json`。
+  - 由于节点关系与交互方式仍需进一步设计，**暂未挂载到主界面**，代码保留。
 
 ### 改进
 
-- **Lab Engine 主界面改为 Notebook**：分为 **Setup 框图** 与 **Run 运行** 两个 tab，便于低代码搭建系统后切换到运行页执行。
-- **RoutinePanel 新增 `select_routine`**：支持外部（Setup 同步）切换当前例程。
+- **RoutinePanel 新增 `select_routine`**：支持外部切换当前例程（为 Setup 同步预留）。
 
 ## 2026-09-16
 
