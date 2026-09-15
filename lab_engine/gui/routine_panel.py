@@ -216,6 +216,14 @@ class RoutinePanel(ttk.Frame):
                 return False
         return True
 
+    def select_routine(self, name: str):
+        """外部调用：切换到指定例程。"""
+        values = self.routine_combo["values"] or []
+        if name not in values:
+            return
+        self.routine_var.set(name)
+        self._load_routine(name)
+
     def set_running(self, running: bool):
         """设置运行状态按钮。"""
         if running:

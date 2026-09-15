@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "nodes": [
+    {
+      "id": "host_1",
+      "type": "host",
+      "x": 100,
+      "y": 220,
+      "label": "上位机",
+      "data": {},
+      "ports": [
+        {"name": "control", "label": "控制", "direction": "output", "data_type": "control"}
+      ]
+    },
+    {
+      "id": "comm_1",
+      "type": "comm",
+      "x": 320,
+      "y": 220,
+      "label": "RS-232 集线器",
+      "data": {
+        "protocol": "RS-232",
+        "address": "COM1",
+        "port": "9600"
+      },
+      "ports": [
+        {"name": "control", "label": "控制", "direction": "input", "data_type": "control"},
+        {"name": "comm", "label": "通信", "direction": "output", "data_type": "comm"}
+      ]
+    },
+    {
+      "id": "inst_k2400",
+      "type": "instrument",
+      "x": 560,
+      "y": 140,
+      "label": "K2400",
+      "data": {
+        "instrument_key": "keithley2400",
+        "alias": "k2400",
+        "port": "COM3",
+        "baudrate": "9600",
+        "interface": "rs232"
+      },
+      "ports": [
+        {"name": "comm", "label": "通信", "direction": "input", "data_type": "comm"},
+        {"name": "data", "label": "数据", "direction": "output", "data_type": "data"}
+      ]
+    },
+    {
+      "id": "inst_gpd",
+      "type": "instrument",
+      "x": 560,
+      "y": 300,
+      "label": "GPD4303S",
+      "data": {
+        "instrument_key": "gpd4303s",
+        "alias": "gpd",
+        "port": "COM4",
+        "baudrate": "9600"
+      },
+      "ports": [
+        {"name": "comm", "label": "通信", "direction": "input", "data_type": "comm"},
+        {"name": "data", "label": "数据", "direction": "output", "data_type": "data"}
+      ]
+    },
+    {
+      "id": "routine_1",
+      "type": "routine",
+      "x": 820,
+      "y": 220,
+      "label": "偏置 IV 扫描",
+      "data": {
+        "routine_name": "偏置 IV 扫描"
+      },
+      "ports": [
+        {"name": "inst_k2400", "label": "k2400", "direction": "input", "data_type": "data"},
+        {"name": "inst_gpd", "label": "gpd", "direction": "input", "data_type": "data"}
+      ]
+    }
+  ],
+  "edges": [
+    {"id": "e_host_comm", "source_node": "host_1", "source_port": "control", "target_node": "comm_1", "target_port": "control"},
+    {"id": "e_comm_k2400", "source_node": "comm_1", "source_port": "comm", "target_node": "inst_k2400", "target_port": "comm"},
+    {"id": "e_comm_gpd", "source_node": "comm_1", "source_port": "comm", "target_node": "inst_gpd", "target_port": "comm"},
+    {"id": "e_k2400_routine", "source_node": "inst_k2400", "source_port": "data", "target_node": "routine_1", "target_port": "inst_k2400"},
+    {"id": "e_gpd_routine", "source_node": "inst_gpd", "source_port": "data", "target_node": "routine_1", "target_port": "inst_gpd"}
+  ]
+}

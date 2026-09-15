@@ -110,12 +110,19 @@ python lab_engine_app.py
 python -m lab_engine
 ```
 
-Lab Engine 是 IVLab 向“插件化实验平台”演进的第一步。它提供一个统一的 GUI 外壳：
+Lab Engine 是 IVLab 向“插件化实验平台”演进的第一步。它提供一个统一的 GUI 外壳，
+主界面分为 **Setup 框图** 与 **Run 运行** 两个 tab：
 
-- 自动按例程声明渲染仪器连接面板
-- 自动按例程声明渲染参数面板
-- 后台线程运行例程，实时显示日志、进度和曲线
-- 每次运行自动生成 `data/<run_id>/data.csv` 与 `metadata.json`
+- **Setup tab**：可视化节点编辑器，低代码搭建实验系统。
+  - 节点：上位机（Host）、通信接口（Comm）、仪器（Instrument）、例程（Routine）。
+  - 拖拽添加节点，鼠标在端口间连线，Delete 删除。
+  - 保存/加载 `*.labsetup.json`。
+  - 点击“应用到运行配置”把框图同步到 Run tab。
+- **Run tab**：
+  - 自动按例程声明渲染仪器连接面板
+  - 自动按例程声明渲染参数面板
+  - 后台线程运行例程，实时显示日志、进度和曲线
+  - 每次运行自动生成 `data/<run_id>/data.csv` 与 `metadata.json`
 
 Phase 1 内置例程：
 
@@ -210,12 +217,14 @@ RS-232_lab_device-main/          # 项目根目录
 │   ├── __main__.py              # python -m lab_engine
 │   ├── core/                    # 引擎核心
 │   │   ├── registry.py          # InstrumentRegistry / RoutineRegistry
+│   │   ├── setup_graph.py       # Setup 框图数据模型（Node / Edge / JSON）
 │   │   ├── routine_context.py   # 例程运行时上下文
 │   │   └── data_manager.py      # run_id / CSV / JSON 保存
 │   ├── gui/                     # GUI 组件
 │   │   ├── shell.py             # DPI / 主题 / 字体
 │   │   ├── connection_panel.py  # 自动仪器连接面板
 │   │   ├── routine_panel.py     # 例程参数面板
+│   │   ├── setup_panel.py       # Setup 框图节点编辑器
 │   │   ├── plot_panel.py        # 实时曲线
 │   │   └── log_panel.py         # 日志面板
 │   ├── instruments/             # 仪器注册（复用 ivlab 驱动）
@@ -233,6 +242,8 @@ RS-232_lab_device-main/          # 项目根目录
 │   ├── k2400_gpd4303s_routine_gui.py  # K2400 + GPD4303S 联合测试例程 GUI（旧原型）
 │   └── routines/                # 可导入的测试例程插件目录（旧原型）
 │       └── bias_iv_sweep.py     # 示例：GPD 偏置 + K2400 IV 扫描
+│   └── setups/                  # Setup 框图示例
+│       └── bias_iv_setup.labsetup.json
 ├── lab_engine_app.py            # 引擎启动入口
 ├── README.md
 ├── CHANGELOG.md
