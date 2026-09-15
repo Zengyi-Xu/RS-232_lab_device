@@ -117,9 +117,18 @@ Lab Engine 是 IVLab 向“插件化实验平台”演进的第一步。它提�
 - 后台线程运行例程，实时显示日志、进度和曲线
 - 每次运行自动生成 `data/<run_id>/data.csv` 与 `metadata.json`
 
-Phase 1 内置例程：
+Phase 2 内置例程：
 
-- `lab_engine/routines/bias_iv_sweep.py`：GPD CH1 提供偏置，K2400 执行 IV 扫描
+| 例程 | 文件 | 所需仪器 | 说明 |
+|------|------|----------|------|
+| 偏置 IV 扫描 | `lab_engine/routines/bias_iv_sweep.py` | K2400 + GPD4303S | GPD 提供偏置，K2400 执行 IV 扫描 |
+| 基础 IV 扫描 | `lab_engine/routines/basic_iv_scan.py` | K2400 | 单向/双向/往返 IV 扫描 |
+| 回滞扫描分析 | `lab_engine/routines/hysteresis_scan.py` | K2400 | 双向扫描 + 回滞面积/指数/对称因子 |
+| 单色仪 IV 联动 | `lab_engine/routines/mono_iv_scan.py` | CS260 + K2400 | 扫波长，K2400 固定电压读电流 |
+| 波长扫描 | `lab_engine/routines/wavelength_scan.py` | CS260 | Cornerstone 260 波长扫描 |
+| SVA1032X VNA | `lab_engine/routines/sva1032x_vna.py` | SVA1032X | S11/S21 测量 + Marker 读数 |
+
+已注册仪器：`keithley2400`、`gpd4303s`、`cornerstone260`、`sva1032x`。
 
 > **Setup 框图（实验性，已暂缓）**：`lab_engine/core/setup_graph.py` 与
 > `lab_engine/gui/setup_panel.py` 已经实现了一个可视化节点编辑器的原型，支持
@@ -227,9 +236,14 @@ RS-232_lab_device-main/          # 项目根目录
 │   │   ├── plot_panel.py        # 实时曲线
 │   │   └── log_panel.py         # 日志面板
 │   ├── instruments/             # 仪器注册（复用 ivlab 驱动）
-│   │   └── __init__.py
+│   │   └── __init__.py          # 注册 K2400 / GPD4303S / CS260 / SVA1032X
 │   └── routines/                # 内置例程插件
-│       └── bias_iv_sweep.py     # GPD 偏置 + K2400 IV 扫描
+│       ├── basic_iv_scan.py     # 基础 IV 扫描
+│       ├── bias_iv_sweep.py     # GPD 偏置 + K2400 IV 扫描
+│       ├── hysteresis_scan.py   # 回滞扫描分析
+│       ├── mono_iv_scan.py      # 单色仪 + 源表联动
+│       ├── sva1032x_vna.py      # SVA1032X VNA 测量
+│       └── wavelength_scan.py   # 波长扫描
 ├── examples/                    # 示例脚本（可直接运行）
 │   ├── basic_iv_scan.py         # 基础扫描示例
 │   ├── hysteresis_scan.py       # 回滞分析示例

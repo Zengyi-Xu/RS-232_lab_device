@@ -4,6 +4,16 @@
 
 ### 新增
 
+- **Lab Engine 例程扩展（Phase 2）**：把 `examples/` 中的多个脚本迁移为引擎内置例程。
+  - `lab_engine/routines/basic_iv_scan.py`：Keithley 2400 基础 IV 扫描（single/double/sweep）。
+  - `lab_engine/routines/hysteresis_scan.py`：双向回滞扫描 + 回滞面积/指数/对称因子分析。
+  - `lab_engine/routines/mono_iv_scan.py`：CS260 扫波长 + K2400 固定电压读电流。
+  - `lab_engine/routines/wavelength_scan.py`：Cornerstone 260 波长扫描。
+  - `lab_engine/routines/sva1032x_vna.py`：Siglent SVA1032X VNA 模式 S11/S21 测量。
+- **仪器注册扩展**：`lab_engine/instruments/__init__.py` 新增 `cornerstone260` 与 `sva1032x` 注册。
+
+### 新增
+
 - **Lab Engine Setup 框图（Phase 2，实验性，暂缓）**：新增可视化节点编辑器原型。
   - 节点类型：上位机（Host）、通信接口（Comm）、仪器（Instrument）、例程（Routine）。
   - 支持拖拽添加节点、鼠标连线、选中编辑属性、Delete 删除。
