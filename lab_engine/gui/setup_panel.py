@@ -39,6 +39,17 @@ NODE_COLORS = {
     "comm": "#8B5CF6",      # 紫
     "instrument": "#10B981",  # 绿
     "routine": "#F59E0B",   # 橙
+    # 代码可视化节点类型
+    "core": "#164E63",      # 深青
+    "gui": "#7C3AED",       # 紫
+    "hardware": "#059669",  # 绿
+    "nn": "#DB2777",        # 品红
+    "plot": "#EA580C",      # 橙
+    "scan": "#0891B2",      # 青
+    "util": "#475569",      # 灰
+    "class": "#8B5CF6",     # 紫
+    "function": "#3B82F6",  # 蓝
+    "method": "#06B6D4",    # 青
 }
 
 # 端口类型配色
@@ -50,6 +61,7 @@ PORT_COLORS = {
 }
 
 GRID_SIZE = 20
+GRID_COLOR = "#64748B"  # 深灰蓝色，在浅灰背景上更清晰
 
 
 class SetupPanel(ttk.Frame):
@@ -61,10 +73,16 @@ class SetupPanel(ttk.Frame):
         routine_registry: RoutineRegistry,
         on_apply: Optional[Callable[[SetupGraph], None]] = None,
         scale: Optional[float] = None,
+        on_node_activate: Optional[Callable[[Node], None]] = None,
+        node_activate_label: str = "查看详情",
+        viewer_mode: bool = False,
     ):
         super().__init__(parent)
         self.routine_registry = routine_registry
         self.on_apply = on_apply
+        self.on_node_activate = on_node_activate
+        self.node_activate_label = node_activate_label
+        self.viewer_mode = viewer_mode
         if scale is None:
             from lab_engine.gui.shell import get_system_dpi
             scale = max(get_system_dpi() / 96.0, 1.0)
@@ -81,6 +99,16 @@ class SetupPanel(ttk.Frame):
         self._temp_edge_coords: Optional[Tuple[float, float, float, float]] = None
         self._move_preview_rect: Optional[int] = None
 
+        # 小地图交互状态
+        self._minimap_pressed = False
+        self._minimap_drag_active = False
+        self._minimap_press_mx: float = 0.0
+        self._minimap_press_my: float = 0.0
+        self._minimap_view_tl: Tuple[float, float] = (0.0, 0.0)
+        self._minimap_view_size: Tuple[float, float] = (0.0, 0.0)
+        self._minimap_press_in_view = False
+        self._minimap_bounds: Tuple[float, float, float, float, float, float] = (0.0, 0.0, 1.0, 1.0, 1.0, 1.0)
+
         # 画布状态
         self.zoom = 1.0
         self.pan_start: Optional[Tuple[float, float]] = None
@@ -95,6 +123,16 @@ class SetupPanel(ttk.Frame):
         self._prop_vars: Dict[str, tk.Variable] = {}
         self._prop_widgets: List[tk.Widget] = []
 
+        # 编辑/只读模式状态
+        self._editable = False
+        self._current_routine: Optional[Any] = None
+        self._toolbar: Optional[tk.Frame] = None
+        self._footer: Optional[tk.Frame] = None
+        self._edit_mode_buttons: List[tk.Widget] = []
+        self._new_routine_btn: Optional[tk.Widget] = None
+        self._template_routine_btn: Optional[tk.Widget] = None
+        self._gen_routine_btn: Optional[tk.Widget] = None
+
         self._build_ui()
         self._bind_events()
 
@@ -102,29 +140,46 @@ class SetupPanel(ttk.Frame):
     # UI 构建
     # ------------------------------------------------------------------
     def _build_ui(self):
-        # 顶部工具栏
-        toolbar = tk.Frame(self, bg=COLOR_BG)
-        toolbar.pack(fill=tk.X, pady=(0, 8))
+        # 顶部工具栏（viewer_mode 下隐藏）
+        if not self.viewer_mode:
+            self._toolbar = tk.Frame(self, bg=COLOR_BG)
+            self._toolbar.pack(fill=tk.X, pady=(0, 8))
+            toolbar = self._toolbar
 
-        ttk.Label(toolbar, text="Setup 框图", style="Title.TLabel").pack(side=tk.LEFT)
+            ttk.Label(toolbar, text="Setup 框图", style="Title.TLabel").pack(side=tk.LEFT)
 
-        ttk.Button(toolbar, text="+ 上位机", command=lambda: self._add_node("host")).pack(
-            side=tk.LEFT, padx=(16, 4)
-        )
-        ttk.Button(toolbar, text="+ 通信", command=lambda: self._add_node("comm")).pack(
-            side=tk.LEFT, padx=4
-        )
-        ttk.Button(toolbar, text="+ 仪器", command=lambda: self._add_node("instrument")).pack(
-            side=tk.LEFT, padx=4
-        )
-        ttk.Button(toolbar, text="+ 例程", command=lambda: self._add_node("routine")).pack(
-            side=tk.LEFT, padx=4
-        )
+            add_btn = ttk.Button(toolbar, text="+ 上位机", command=lambda: self._add_node("host"))
+            add_btn.pack(side=tk.LEFT, padx=(16, 4))
+            self._edit_mode_buttons.append(add_btn)
+            add_btn = ttk.Button(toolbar, text="+ 通信", command=lambda: self._add_node("comm"))
+            add_btn.pack(side=tk.LEFT, padx=4)
+            self._edit_mode_buttons.append(add_btn)
+            add_btn = ttk.Button(toolbar, text="+ 仪器", command=lambda: self._add_node("instrument"))
+            add_btn.pack(side=tk.LEFT, padx=4)
+            self._edit_mode_buttons.append(add_btn)
+            add_btn = ttk.Button(toolbar, text="+ 例程", command=lambda: self._add_node("routine"))
+            add_btn.pack(side=tk.LEFT, padx=4)
+            self._edit_mode_buttons.append(add_btn)
 
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
-        ttk.Button(toolbar, text="新建", command=self._new_graph).pack(side=tk.LEFT, padx=4)
-        ttk.Button(toolbar, text="打开", command=self._load_graph).pack(side=tk.LEFT, padx=4)
-        ttk.Button(toolbar, text="保存", command=self._save_graph).pack(side=tk.LEFT, padx=4)
+            ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+            ttk.Button(toolbar, text="清空", command=self._new_graph).pack(side=tk.LEFT, padx=4)
+            ttk.Button(toolbar, text="打开", command=self._load_graph).pack(side=tk.LEFT, padx=4)
+            ttk.Button(toolbar, text="保存", command=self._save_graph).pack(side=tk.LEFT, padx=4)
+
+            ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+            self._new_routine_btn = ttk.Button(
+                toolbar, text="✚ 新建例程", command=self._on_new_routine
+            )
+            self._new_routine_btn.pack(side=tk.LEFT, padx=4)
+            self._template_routine_btn = ttk.Button(
+                toolbar, text="📋 基于模板新建", command=self._on_new_from_template
+            )
+            self._template_routine_btn.pack(side=tk.LEFT, padx=4)
+            self._gen_routine_btn = ttk.Button(
+                toolbar, text="⬇ 生成例程代码", command=self._on_generate_routine,
+                state=tk.DISABLED,
+            )
+            self._gen_routine_btn.pack(side=tk.LEFT, padx=4)
 
         # 主区域：canvas + 属性面板
         body = tk.Frame(self, bg=COLOR_BG)
@@ -142,6 +197,7 @@ class SetupPanel(ttk.Frame):
             scrollregion=(0, 0, dpi_scale(4000, self.scale), dpi_scale(3000, self.scale)),
         )
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.tk_scaling = self.canvas.tk.call("tk", "scaling")
 
         vbar = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL, command=self.canvas.yview)
         vbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -190,20 +246,164 @@ class SetupPanel(ttk.Frame):
             lambda _e: self.prop_canvas.configure(scrollregion=self.prop_canvas.bbox("all"))
         )
 
-        ttk.Label(prop_inner, text="提示: 选中节点后编辑属性，拖拽端口连线。\nCtrl+滚轮缩放，空格+左键平移。",
-                  wraplength=dpi_scale(260, self.scale), style="DimCard.TLabel").pack(
-            side=tk.BOTTOM, anchor=tk.W, pady=(8, 0)
-        )
+        if not self.viewer_mode:
+            ttk.Label(prop_inner, text="提示: 选中节点后编辑属性，拖拽端口连线。\nCtrl+滚轮缩放，空格+左键平移，中键拖拽平移画布。",
+                      wraplength=dpi_scale(260, self.scale), style="DimCard.TLabel").pack(
+                side=tk.BOTTOM, anchor=tk.W, pady=(8, 0)
+            )
 
-        # 底部操作栏
-        footer = tk.Frame(self, bg=COLOR_BG)
-        footer.pack(fill=tk.X, pady=(8, 0))
-        self.apply_btn = ttk.Button(
-            footer, text="应用到运行配置", style="Accent.TButton", command=self._apply_to_run
+        # 底部操作栏（viewer_mode 下隐藏）
+        if not self.viewer_mode:
+            self._footer = tk.Frame(self, bg=COLOR_BG)
+            self._footer.pack(fill=tk.X, pady=(8, 0))
+            footer = self._footer
+            self.apply_btn = ttk.Button(
+                footer, text="应用到运行配置", style="Accent.TButton", command=self._apply_to_run
+            )
+            self.apply_btn.pack(side=tk.RIGHT)
+            self._edit_mode_buttons.append(self.apply_btn)
+            self.status_lbl = ttk.Label(footer, text="就绪")
+            self.status_lbl.pack(side=tk.LEFT)
+        else:
+            self.status_lbl = ttk.Label(self, text="")
+            self.status_lbl.pack(side=tk.BOTTOM, anchor=tk.W)
+
+    def set_editable(self, editable: bool):
+        """切换编辑/只读模式。
+
+        查看现有例程时设为 False：禁止添加/删除节点、禁止拖拽/连线、
+        属性面板只读；点击"新建例程"后设为 True，允许编辑。
+        """
+        self._editable = editable
+
+        # 启用/禁用编辑工具栏按钮
+        state = tk.NORMAL if editable else tk.DISABLED
+        for btn in self._edit_mode_buttons:
+            btn.configure(state=state)
+
+        # "生成例程代码" 按钮只有在编辑模式下且框图非空时才可用
+        if editable and self._gen_routine_btn is not None:
+            has_routine = any(n.node_type == "routine" for n in self.graph.nodes.values())
+            self._gen_routine_btn.configure(state=tk.NORMAL if has_routine else tk.DISABLED)
+        elif self._gen_routine_btn is not None:
+            self._gen_routine_btn.configure(state=tk.DISABLED)
+
+        # 只读模式下取消当前选中，刷新属性面板为只读信息
+        if not editable:
+            self._select_node(None)
+        else:
+            self._clear_property_panel()
+            ttk.Label(self.prop_frame, text="编辑模式：添加节点并连线后，可生成例程代码",
+                      style="DimCard.TLabel", wraplength=dpi_scale(240, self.scale)).pack(
+                anchor=tk.W, pady=(4, 0))
+
+        mode = "编辑模式" if editable else "只读模式"
+        self._set_status(f"已切换为 {mode}")
+
+    def set_current_routine(self, routine: Optional[Any]):
+        """外部调用：切换 Setup 框图中显示的例程结构。
+
+        运行 Tab 选中某个例程时，会同步调用此方法，Setup 框图只显示
+        该例程的仪器依赖链，并进入只读模式；未选择例程时显示空画布。
+        """
+        self._current_routine = routine
+        self.graph = SetupGraph()
+        self.selected_node_id = None
+        self._clear_property_panel()
+
+        if routine is None:
+            self.set_editable(False)
+            self._redraw_all()
+            self._set_status("请在“运行”Tab 选择一个例程，或点击“新建例程/基于模板新建”开始编辑")
+            return
+
+        self._build_routine_view(routine, editable=False)
+
+    def _build_routine_view(self, routine: Any, editable: bool = False):
+        """生成单个例程的框图结构：上位机 → 通信接口 → 仪器(们) → 例程。"""
+        start_x = 120
+        start_y = 180
+        col_comm = 220
+        col_inst = 240
+        col_inst_step = 220
+
+        # 上位机
+        host = self.graph.add_node("host", start_x, start_y, label="上位机")
+        # 通信接口
+        comm = self.graph.add_node("comm", start_x + col_comm, start_y, label="通信接口")
+        self.graph.add_edge(host.node_id, "control", comm.node_id, "control")
+
+        # 仪器节点
+        inst_nodes: Dict[str, Node] = {}
+        inst_x = start_x + col_comm + col_inst
+        for alias, info in routine.instruments.items():
+            inst_key = info.get("type", alias)
+            meta = InstrumentRegistry.get(inst_key)
+            label = meta.name if meta else inst_key
+            inst = self.graph.add_node(
+                "instrument", inst_x, start_y,
+                label=label,
+                data={"instrument_key": inst_key, "alias": alias},
+            )
+            self._rebuild_instrument_ports(inst)
+            self.graph.add_edge(comm.node_id, "comm", inst.node_id, "comm")
+            inst_nodes[alias] = inst
+            inst_x += col_inst_step
+
+        # 例程节点：保存模板引用，以便生成代码时复用 PARAMS 等结构
+        routine_node = self.graph.add_node(
+            "routine", inst_x, start_y,
+            label=routine.name,
+            data={
+                "routine_name": routine.name,
+                "_template_routine": routine,
+            },
         )
-        self.apply_btn.pack(side=tk.RIGHT)
-        self.status_lbl = ttk.Label(footer, text="就绪")
-        self.status_lbl.pack(side=tk.LEFT)
+        self._rebuild_routine_ports(routine_node)
+        for alias, inst in inst_nodes.items():
+            self.graph.add_edge(inst.node_id, "data", routine_node.node_id, f"inst_{alias}")
+
+        self.canvas.delete("help_text")
+        self._redraw_all()
+        self._center_canvas_on_logical(start_x + (inst_x - start_x) / 2, start_y)
+
+        self.set_editable(editable)
+        if editable:
+            self._set_status(f"编辑模板: {routine.name}，可修改仪器/参数后生成新例程")
+        else:
+            self._show_routine_info(routine)
+            self._set_status(f"只读预览: {routine.name}")
+
+    def _show_routine_info(self, routine: Any):
+        """在右侧属性面板显示当前例程的元数据（只读）。"""
+        self._clear_property_panel()
+        ttk.Label(self.prop_frame, text=routine.name,
+                  style="Section.TLabel").pack(anchor=tk.W, pady=(0, 8))
+        if routine.description:
+            ttk.Label(self.prop_frame, text=f"描述: {routine.description}",
+                      style="DimCard.TLabel", wraplength=dpi_scale(240, self.scale)).pack(
+                anchor=tk.W, pady=(0, 6))
+        if routine.icon:
+            ttk.Label(self.prop_frame, text=f"图标: {routine.icon}",
+                      style="DimCard.TLabel").pack(anchor=tk.W, pady=(0, 6))
+
+        ttk.Label(self.prop_frame, text="所需仪器:", style="Section.TLabel").pack(
+            anchor=tk.W, pady=(8, 4))
+        for alias, info in routine.instruments.items():
+            inst_type = info.get("type", alias)
+            required = "必需" if info.get("required", True) else "可选"
+            ttk.Label(self.prop_frame, text=f"  • {alias} ({inst_type}) — {required}",
+                      style="DimCard.TLabel").pack(anchor=tk.W)
+
+        if routine.params:
+            ttk.Label(self.prop_frame, text="参数:", style="Section.TLabel").pack(
+                anchor=tk.W, pady=(8, 4))
+            for p in routine.params:
+                name = p.get("name", "")
+                label = p.get("label", name)
+                default = p.get("default", "")
+                ttk.Label(self.prop_frame, text=f"  • {label}: 默认值 {default}",
+                          style="DimCard.TLabel").pack(anchor=tk.W)
 
     def _build_minimap(self):
         """右下角小地图。"""
@@ -217,39 +417,32 @@ class SetupPanel(ttk.Frame):
         )
         # 固定在 canvas 右下角，不随内容滚动
         self.minimap.place(relx=1.0, rely=1.0, anchor=tk.SE, x=-8, y=-8)
+        self.minimap.bind("<ButtonPress-1>", self._on_minimap_press)
+        self.minimap.bind("<B1-Motion>", self._on_minimap_drag)
+        self.minimap.bind("<ButtonRelease-1>", self._on_minimap_release)
 
     def _draw_help_text(self):
-        """在画布左上角绘制帮助文本。"""
+        """在画布左上角绘制帮助文本，节点统一放在下方空白处避免重叠。"""
         help_lines = [
-            "Setup 框图使用说明",
+            "Setup 框图",
             "",
-            "1. 点击顶部按钮添加节点（上位机/通信/仪器/例程）",
-            "2. 拖拽节点移动位置（自动吸附到网格）",
-            "3. 从输出端口拖到输入端口创建连线",
-            "4. 选中节点后可在右侧编辑属性",
-            "5. Delete 删除选中节点",
-            "",
-            "快捷键：",
-            "  Ctrl + 滚轮  —— 缩放画布",
-            "  空格 + 左键  —— 平移画布",
-            "  中键拖拽     —— 平移画布",
-            "",
-            "节点关系：上位机 → 通信接口 → 仪器 → 例程",
+            "添加节点后拖拽端口连线",
+            "Ctrl+滚轮缩放  空格+左键平移",
+            "节点关系：上位机 → 通信 → 仪器 → 例程",
         ]
-        x, y = self._to_screen(30, 30)
+        # 左上角对齐，确保初始画面一定能看到
+        x = self._to_screen_scalar(30)
+        y = self._to_screen_scalar(30)
         line_h = self._to_screen_scalar(18)
         for i, line in enumerate(help_lines):
             if i == 0:
-                font = (UI_FONT, 10, "bold")
+                font = self._font(10, bold=True)
                 fill = COLOR_PRIMARY
             elif line == "":
                 continue
-            elif line.startswith("  "):
-                font = (UI_FONT, 8)
-                fill = COLOR_TEXT_DIM
             else:
-                font = (UI_FONT, 9)
-                fill = "#475569"
+                font = self._font(8)
+                fill = COLOR_TEXT_DIM
             self.canvas.create_text(
                 x, y + i * line_h,
                 text=line, font=font, fill=fill,
@@ -270,7 +463,7 @@ class SetupPanel(ttk.Frame):
             for y in range(0, int(height), max(1, int(step))):
                 item = self.canvas.create_oval(
                     x - 1, y - 1, x + 1, y + 1,
-                    fill="#E2E8F0", outline="",
+                    fill=GRID_COLOR, outline="",
                 )
                 self._grid_items.append(item)
         self.canvas.tag_lower("grid")
@@ -281,12 +474,17 @@ class SetupPanel(ttk.Frame):
         self.canvas.bind("<ButtonPress-1>", self._on_canvas_press)
         self.canvas.bind("<B1-Motion>", self._on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
+        self.canvas.bind("<Double-Button-1>", self._on_canvas_double_click)
+        self.canvas.bind("<ButtonPress-3>", self._on_canvas_right_click)
         self.canvas.bind("<ButtonPress-2>", self._on_middle_press)
         self.canvas.bind("<B2-Motion>", self._on_middle_drag)
         self.canvas.bind("<ButtonRelease-2>", self._on_middle_release)
         self.canvas.bind("<MouseWheel>", self._on_mousewheel)
-        self.bind_all("<KeyPress-space>", self._on_space_press)
-        self.bind_all("<KeyRelease-space>", self._on_space_release)
+        # 空格键只绑定到画布，避免在 Notebook 其他 Tab 中误触发（空格平移画布）
+        self.canvas.bind("<KeyPress-space>", self._on_space_press)
+        self.canvas.bind("<KeyRelease-space>", self._on_space_release)
+        # Delete/BackSpace 用 bind_all，保证焦点不在画布时也能删除节点；
+        # 实际删除操作在 _on_delete_key 里会检查 _editable
         self.bind_all("<Delete>", self._on_delete_key)
         self.bind_all("<BackSpace>", self._on_delete_key)
 
@@ -396,6 +594,17 @@ class SetupPanel(ttk.Frame):
         """把屏幕坐标转换为数据坐标。"""
         return x / (self.zoom * self.scale), y / (self.zoom * self.scale)
 
+    def _font(self, size: int, bold: bool = False):
+        """返回随 zoom/scale 缩放的字体，使字体像素高度与节点方框保持比例。
+
+        tk scaling 会额外放大字体，因此用 4/3 补偿默认 96 DPI 下的 tk scaling
+        （96/72 = 4/3），保证 96 DPI、zoom=1 时字体大小与原来一致。
+        """
+        s = max(1, int(round(size * 4 / 3 * self.zoom * self.scale / self.tk_scaling)))
+        if bold:
+            return (UI_FONT, s, "bold")
+        return (UI_FONT, s)
+
     def _draw_node(self, node: Node):
         self._erase_node(node.node_id)
         items: Dict[str, Any] = {"ports": {}, "labels": []}
@@ -428,7 +637,7 @@ class SetupPanel(ttk.Frame):
         title_text = self.canvas.create_text(
             x + zw / 2, y + title_h / 2,
             text=node.label, fill="white",
-            font=(UI_FONT, 9, "bold"),
+            font=self._font(9, bold=True),
             tags=(f"node:{node.node_id}", "node_title"),
         )
         items["title"] = title_text
@@ -437,7 +646,7 @@ class SetupPanel(ttk.Frame):
         type_text = self.canvas.create_text(
             x + zw / 2, y + zh - self._to_screen_scalar(10),
             text=node.node_type, fill=COLOR_TEXT_DIM,
-            font=(UI_FONT, 8),
+            font=self._font(8),
             tags=(f"node:{node.node_id}", "node_type"),
         )
         items["type_label"] = type_text
@@ -460,7 +669,7 @@ class SetupPanel(ttk.Frame):
             lbl = self.canvas.create_text(
                 px + self._to_screen_scalar(10), py,
                 text=port.label, fill=COLOR_TEXT_DIM,
-                font=(UI_FONT, 8),
+                font=self._font(8),
                 anchor=tk.W, tags=(f"port_label:{node.node_id}:{port.name}",),
             )
             items["labels"].append(lbl)
@@ -479,7 +688,7 @@ class SetupPanel(ttk.Frame):
             lbl = self.canvas.create_text(
                 px - self._to_screen_scalar(10), py,
                 text=port.label, fill=COLOR_TEXT_DIM,
-                font=(UI_FONT, 8),
+                font=self._font(8),
                 anchor=tk.E, tags=(f"port_label:{node.node_id}:{port.name}",),
             )
             items["labels"].append(lbl)
@@ -508,7 +717,7 @@ class SetupPanel(ttk.Frame):
                 msg_text = self.canvas.create_text(
                     dot_x - dot_r - 4, dot_y,
                     text=msg, fill=dot_color,
-                    font=(UI_FONT, max(6, int(7 * self.zoom))),
+                    font=self._font(7),
                     anchor=tk.E,
                     tags=(f"status_msg:{node.node_id}", "status_msg"),
                 )
@@ -638,6 +847,7 @@ class SetupPanel(ttk.Frame):
 
         w = self.minimap.winfo_width() or dpi_scale(160, self.scale)
         h = self.minimap.winfo_height() or dpi_scale(120, self.scale)
+        self._minimap_bounds = (min_x, min_y, span_x, span_y, w, h)
 
         # 绘制节点
         for node in self.graph.nodes.values():
@@ -668,6 +878,115 @@ class SetupPanel(ttk.Frame):
             mx1, my1, mx2, my2,
             outline=COLOR_PRIMARY, width=2, dash=(3, 3),
         )
+
+    def _get_view_logical_rect(self) -> Tuple[float, float, float, float]:
+        """返回主画布当前视口的逻辑坐标范围 (x1, y1, x2, y2)。"""
+        vx1 = self.canvas.canvasx(0)
+        vy1 = self.canvas.canvasy(0)
+        vx2 = self.canvas.canvasx(self.canvas.winfo_width())
+        vy2 = self.canvas.canvasy(self.canvas.winfo_height())
+        lx1, ly1 = self._from_screen(vx1, vy1)
+        lx2, ly2 = self._from_screen(vx2, vy2)
+        return lx1, ly1, lx2, ly2
+
+    def _set_view_top_left_logical(self, lx: float, ly: float):
+        """让主画布以指定逻辑坐标为左上角显示，并限制在滚动范围内。"""
+        sr = self.canvas.cget("scrollregion")
+        if not sr:
+            return
+        sr_w, sr_h = [float(v) for v in sr.split()[2:]]
+        view_w = max(1, self.canvas.winfo_width())
+        view_h = max(1, self.canvas.winfo_height())
+
+        sx = lx * self.zoom * self.scale
+        sy = ly * self.zoom * self.scale
+
+        # 限制左上角不超出滚动区域
+        sx = max(0.0, sx)
+        sy = max(0.0, sy)
+        sx = min(sx, max(0.0, sr_w - view_w))
+        sy = min(sy, max(0.0, sr_h - view_h))
+
+        self.canvas.xview_moveto(sx / sr_w)
+        self.canvas.yview_moveto(sy / sr_h)
+        self._update_minimap()
+
+    def _center_canvas_on_logical(self, lx: float, ly: float):
+        """让主画布以指定逻辑坐标为中心显示。"""
+        view_w = max(1, self.canvas.winfo_width())
+        view_h = max(1, self.canvas.winfo_height())
+        tl_x = lx - self._from_screen(view_w / 2, 0)[0]
+        tl_y = ly - self._from_screen(0, view_h / 2)[1]
+        self._set_view_top_left_logical(tl_x, tl_y)
+
+    def _on_minimap_press(self, event):
+        if not self.graph.nodes:
+            return
+        self._update_minimap()
+        self._minimap_pressed = True
+        self._minimap_drag_active = False
+        self._minimap_press_mx = event.x
+        self._minimap_press_my = event.y
+
+        min_x, min_y, span_x, span_y, w, h = self._minimap_bounds
+        if w <= 0 or h <= 0:
+            return
+
+        # 当前视口逻辑范围
+        lx1, ly1, lx2, ly2 = self._get_view_logical_rect()
+        self._minimap_view_tl = (lx1, ly1)
+        self._minimap_view_size = (lx2 - lx1, ly2 - ly1)
+
+        # 鼠标按下位置对应的逻辑坐标
+        mlx = min_x + event.x / w * span_x
+        mly = min_y + event.y / h * span_y
+        self._minimap_press_in_view = (lx1 <= mlx <= lx2 and ly1 <= mly <= ly2)
+        self.minimap.config(cursor="fleur")
+
+    def _on_minimap_drag(self, event):
+        if not self._minimap_pressed:
+            return
+        min_x, min_y, span_x, span_y, w, h = self._minimap_bounds
+        if w <= 0 or h <= 0:
+            return
+
+        dmx = event.x - self._minimap_press_mx
+        dmy = event.y - self._minimap_press_my
+
+        # 移动超过阈值才视为拖拽，避免轻微抖动触发拖拽
+        if not self._minimap_drag_active:
+            if math.hypot(dmx, dmy) < 3:
+                return
+            self._minimap_drag_active = True
+
+        tl_x, tl_y = self._minimap_view_tl
+        if self._minimap_press_in_view:
+            # 抓住视口内部拖动：视口随鼠标偏移
+            dx_logic = dmx / w * span_x
+            dy_logic = dmy / h * span_y
+            self._set_view_top_left_logical(tl_x + dx_logic, tl_y + dy_logic)
+        else:
+            # 在视口外拖动：鼠标当前位置作为视口中心
+            mlx = min_x + event.x / w * span_x
+            mly = min_y + event.y / h * span_y
+            view_w, view_h = self._minimap_view_size
+            self._set_view_top_left_logical(mlx - view_w / 2, mly - view_h / 2)
+
+    def _on_minimap_release(self, event):
+        if not self._minimap_pressed:
+            return
+
+        # 如果没有触发过拖拽，视为单击：跳转到点击位置
+        if not self._minimap_drag_active:
+            min_x, min_y, span_x, span_y, w, h = self._minimap_bounds
+            if w > 0 and h > 0:
+                mlx = min_x + event.x / w * span_x
+                mly = min_y + event.y / h * span_y
+                self._center_canvas_on_logical(mlx, mly)
+
+        self._minimap_pressed = False
+        self._minimap_drag_active = False
+        self.minimap.config(cursor="")
 
     # ------------------------------------------------------------------
     # 鼠标交互
@@ -702,6 +1021,14 @@ class SetupPanel(ttk.Frame):
             self.canvas.config(cursor="fleur")
             return
 
+        if not self._editable:
+            # 只读模式下只允许选中节点查看信息，禁止拖拽/连线
+            if kind == "node":
+                self._select_node(node_id)
+            else:
+                self._select_node(None)
+            return
+
         if kind == "port":
             self._edge_start = (node_id, port_name)
             self._drag_start = (x, y)
@@ -722,6 +1049,9 @@ class SetupPanel(ttk.Frame):
 
         if self._panning:
             self.canvas.scan_dragto(event.x, event.y, gain=1)
+            return
+
+        if not self._editable:
             return
 
         if self._edge_start is not None:
@@ -758,6 +1088,9 @@ class SetupPanel(ttk.Frame):
             self.canvas.config(cursor="")
             return
 
+        if not self._editable:
+            return
+
         if self._edge_start is not None:
             self._clear_temp_edge()
             self._clear_port_highlights()
@@ -778,6 +1111,35 @@ class SetupPanel(ttk.Frame):
             self._drag_node_start = None
             self._drag_mouse_start = None
             self._clear_move_preview()
+
+    def _on_canvas_double_click(self, event):
+        """双击节点触发激活回调。"""
+        if not self.on_node_activate:
+            return
+        x, y = self._canvas_to_graph(event.x, event.y)
+        kind, node_id, _ = self._hit_test(x, y)
+        if kind == "node":
+            node = self.graph.get_node(node_id)
+            if node:
+                self.on_node_activate(node)
+
+    def _on_canvas_right_click(self, event):
+        """右键节点弹出上下文菜单。"""
+        if not self.on_node_activate:
+            return
+        x, y = self._canvas_to_graph(event.x, event.y)
+        kind, node_id, _ = self._hit_test(x, y)
+        if kind != "node":
+            return
+        node = self.graph.get_node(node_id)
+        if node is None:
+            return
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(
+            label=self.node_activate_label,
+            command=lambda: self.on_node_activate(node),
+        )
+        menu.post(event.x_root, event.y_root)
 
     def _on_middle_press(self, event):
         self._panning = True
@@ -815,6 +1177,8 @@ class SetupPanel(ttk.Frame):
         pass
 
     def _on_delete_key(self, _event):
+        if not self._editable:
+            return
         if self.selected_node_id:
             self._remove_node(self.selected_node_id)
             self._set_status("已删除节点")
@@ -923,6 +1287,7 @@ class SetupPanel(ttk.Frame):
         self._edge_items.clear()
         self._grid_items.clear()
         self._draw_grid()
+        self._draw_help_text()
         for node in self.graph.nodes.values():
             self._draw_node(node)
         self._redraw_all_edges()
@@ -1018,6 +1383,8 @@ class SetupPanel(ttk.Frame):
         self._prop_widgets.extend([row, cb])
 
     def _on_prop_changed(self, node: Node, key: str, var: tk.Variable):
+        if not self._editable:
+            return
         value = var.get()
         old_value = node.data.get(key)
         node.data[key] = value
@@ -1036,6 +1403,185 @@ class SetupPanel(ttk.Frame):
             self._build_property_panel()
 
         self._set_status(f"更新 {node.label}.{key}")
+
+    # ------------------------------------------------------------------
+    # 例程生成
+    # ------------------------------------------------------------------
+    def _on_new_routine(self):
+        """进入编辑模式，清空画布，提供最小例程模板。"""
+        self._current_routine = None
+        self.graph = SetupGraph()
+        self.selected_node_id = None
+        self._clear_property_panel()
+
+        # 自动放置一个最小模板：上位机 → 通信 → 例程
+        host = self.graph.add_node("host", 120, 180, label="上位机")
+        comm = self.graph.add_node("comm", 340, 180, label="通信接口")
+        routine = self.graph.add_node("routine", 780, 180, label="新例程", data={"routine_name": "新例程"})
+        self._rebuild_routine_ports(routine)
+        self.graph.add_edge(host.node_id, "control", comm.node_id, "control")
+
+        self.canvas.delete("help_text")
+        self._redraw_all()
+        self.set_editable(True)
+        self._center_canvas_on_logical(450, 180)
+        self._set_status("编辑模式：拖拽添加仪器节点并连线，完成后点击“生成例程代码”")
+
+    def _on_new_from_template(self):
+        """选择一个现有例程作为模板，进入编辑模式并加载其框图/参数。"""
+        names = self.routine_registry.names()
+        if not names:
+            messagebox.showwarning("提示", "当前没有可用的例程模板")
+            return
+
+        # 简单弹窗选择模板
+        dialog = tk.Toplevel(self)
+        dialog.title("选择例程模板")
+        dialog.configure(bg=COLOR_BG)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text="选择一个现有例程作为模板：", style="Subtitle.TLabel").pack(
+            anchor=tk.W, padx=16, pady=(16, 8))
+
+        listbox = tk.Listbox(dialog, height=min(10, len(names)), font=(UI_FONT, 10))
+        for name in names:
+            listbox.insert(tk.END, name)
+        listbox.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
+        if names:
+            listbox.selection_set(0)
+
+        selected_name = [None]
+
+        def on_ok():
+            sel = listbox.curselection()
+            if sel:
+                selected_name[0] = names[sel[0]]
+            dialog.destroy()
+
+        def on_cancel():
+            dialog.destroy()
+
+        btn_frame = tk.Frame(dialog, bg=COLOR_BG)
+        btn_frame.pack(fill=tk.X, padx=16, pady=(0, 16))
+        ttk.Button(btn_frame, text="确定", command=on_ok).pack(side=tk.RIGHT, padx=(8, 0))
+        ttk.Button(btn_frame, text="取消", command=on_cancel).pack(side=tk.RIGHT)
+
+        self.wait_window(dialog)
+
+        if selected_name[0] is None:
+            return
+
+        routine = self.routine_registry.get(selected_name[0])
+        if routine is None:
+            return
+
+        self._current_routine = routine
+        self._build_routine_view(routine, editable=True)
+
+    def _on_generate_routine(self):
+        """根据当前框图生成一个例程 Python 文件骨架。"""
+        if not self._editable:
+            return
+
+        routines = [n for n in self.graph.nodes.values() if n.node_type == "routine"]
+        if not routines:
+            messagebox.showwarning("提示", "框图中需要至少一个“例程”节点才能生成代码")
+            return
+
+        # 取第一个 routine 节点作为主体
+        routine_node = routines[0]
+        routine_name = routine_node.data.get("routine_name") or routine_node.label or "新例程"
+
+        # 收集仪器连接：通过边找到连到 routine 的 instrument 节点
+        instruments: Dict[str, Dict[str, Any]] = {}
+        for edge in self.graph.edges.values():
+            if edge.target_node != routine_node.node_id:
+                continue
+            src_node = self.graph.get_node(edge.source_node)
+            if src_node is None or src_node.node_type != "instrument":
+                continue
+            alias = src_node.data.get("alias") or f"inst_{len(instruments) + 1}"
+            inst_key = src_node.data.get("instrument_key") or "keithley2400"
+            instruments[alias] = {"type": inst_key, "required": True}
+
+        # 收集参数：优先使用模板例程的 PARAMS 结构，并用属性面板中修改后的值覆盖
+        template_routine = routine_node.data.get("_template_routine")
+        params: List[Dict[str, Any]] = []
+        if template_routine and template_routine.params:
+            for p in template_routine.params:
+                p = dict(p)
+                name = p.get("name", "")
+                if name and name in routine_node.data:
+                    p["default"] = routine_node.data[name]
+                params.append(p)
+
+        # 生成文件名建议：用例程名转安全字符
+        safe_name = "".join(c if c.isalnum() or c == "_" else "_" for c in routine_name).strip("_")
+        if not safe_name:
+            safe_name = "new_routine"
+        default_path = (Path(__file__).resolve().parent.parent / "routines" / safe_name).with_suffix(".py")
+
+        path = filedialog.asksaveasfilename(
+            defaultextension=".py",
+            filetypes=[("Python 例程", "*.py")],
+            title="生成例程代码",
+            initialfile=default_path.name,
+            initialdir=str(default_path.parent),
+        )
+        if not path:
+            return
+
+        code = self._render_routine_template(routine_name, instruments, params)
+        try:
+            Path(path).write_text(code, encoding="utf-8")
+            self._set_status(f"已生成例程: {path}")
+            messagebox.showinfo("生成成功", f"例程骨架已保存到:\n{path}\n\n请在 run() 函数中补充具体测试逻辑。")
+        except Exception as exc:
+            messagebox.showerror("保存失败", str(exc))
+
+    @staticmethod
+    def _render_routine_template(
+        name: str,
+        instruments: Dict[str, Dict[str, Any]],
+        params: List[Dict[str, Any]] = None,
+    ) -> str:
+        """渲染例程 Python 文件模板。"""
+        inst_lines = ",\n".join(
+            f'    "{alias}": {info}' for alias, info in instruments.items()
+        )
+        instrument_getters = "\n".join(
+            f"    {alias} = instruments.get(\"{alias}\")" for alias in instruments.keys()
+        )
+        params = params or []
+        params_repr = repr(params) if params else "[]"
+        return f'''\
+NAME = "{name}"
+DESCRIPTION = ""
+ICON = "🔬"
+
+INSTRUMENTS = {{
+{inst_lines}
+}}
+
+PARAMS = {params_repr}
+
+
+def run(instruments, params, context):
+    """执行例程。"""
+    context.log("开始运行: {name}")
+{instrument_getters}
+
+    # TODO: 在这里补充具体的测试逻辑
+    # 例如：
+    # for v in np.linspace(params.get("start_v", 0), params.get("stop_v", 1), params.get("points", 11)):
+    #     k2400.set_output_level(v)
+    #     data = k2400.measure()
+    #     context.point(voltage=v, current=data["current"])
+
+    context.log("例程运行完成")
+    context.done(success=True)
+'''
 
     # ------------------------------------------------------------------
     # 文件操作
