@@ -133,12 +133,16 @@ Phase 2 内置例程：
 
 已注册仪器：`keithley2400`、`gpd4303s`、`cornerstone260`、`sva1032x`、`m8190a`、`oscilloscope`。
 
-> **Setup 框图（实验性，已解耦）**：`lab_engine/core/setup_graph.py` 与
+> **Setup 框图**：`lab_engine/core/setup_graph.py` 与
 > `lab_engine/gui/setup_panel.py` 已重构为可视化节点编辑器，支持
 > Host / Comm / Instrument / Routine 四种节点、圆角矩形、贝塞尔连线、
 > 画布缩放/平移、网格背景、节点状态指示与端口类型高亮。
-> 由于节点关系与交互方式仍需进一步设计，该功能暂时**没有挂载到主界面**，
-> 代码保留在仓库中，可用 `python test_setup_panel.py` 单独预览。
+> Lab Engine 主界面现在有三个 Tab：
+> - **运行**：原来的主界面，选择/运行测试例程。
+> - **例程结构**：只读查看当前选中的测试例程的仪器依赖链，Tab 标题会显示例程名。
+> - **测试系统设计**：可编辑的框图编辑器，支持新建空白例程或基于现有例程模板修改，
+>   生成新的测试例程 Python 文件。
+> 也可通过 `python test_setup_panel.py` 单独预览。
 
 通信例程套件位于 `lab_engine/routines/communication/`，通过 `sys.path` 自动定位
 同 workspace 下的 `DMT_PY_NN` 仓库并调用其中的 pipeline 函数。
@@ -344,8 +348,11 @@ CS260 的 USB 版不是虚拟串口，需通过 Newport 官方 `Cornerstone.dll`
 该 DLL 是 .NET 2.0 程序集，在 64 位进程下枚举设备会触发 `IntPtr` 溢出，
 因此驱动内部启动一个 32 位 Windows PowerShell 子进程加载 DLL
 （`_cornerstone_bridge.ps1`），主进程通过 JSON 行协议与其通信。
-前提：已安装 Newport Mono Utility（含 Cypress USB 驱动），DLL 默认搜索
-`C:\Program Files (x86)\Newport\Mono Utility 5.0.4\Cornerstone DLL\`。
+
+**前提**：必须先在 Windows 上安装 **Newport Mono Utility**（例如 5.0.4 版本，
+含 Cypress USB 驱动）。DLL 默认搜索路径为
+`C:\Program Files (x86)\Newport\Mono Utility 5.0.4\Cornerstone DLL\`；
+若安装路径不同，可在代码或 Lab Engine 面板中显式指定 `dll_path`。
 
 ```python
 from ivlab.instruments.cornerstone260 import Cornerstone260

@@ -14,6 +14,7 @@ from lab_engine.gui.connection_panel import ConnectionPanel
 from lab_engine.gui.log_panel import LogPanel
 from lab_engine.gui.plot_panel import PlotPanel
 from lab_engine.gui.routine_panel import RoutinePanel
+from lab_engine.gui.setup_panel import SetupPanel
 from lab_engine.gui.shell import (
     COLOR_BG,
     COLOR_CARD,
@@ -112,9 +113,44 @@ class LabEngineApp(tk.Tk):
         self.status_lbl = ttk.Label(header, text="就绪")
         self.status_lbl.pack(side=tk.RIGHT)
 
+        # 主区域：Tab 分页
+        notebook = ttk.Notebook(self)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 8))
+        self.notebook = notebook
+
+        # Tab 1：运行（原来的主界面）
+        run_tab = tk.Frame(notebook, bg=COLOR_BG)
+        notebook.add(run_tab, text="  运行  ")
+        self._build_run_tab(run_tab)
+
+        # Tab 2：例程结构（只读，显示当前选中的测试例程）
+        view_tab = tk.Frame(notebook, bg=COLOR_BG)
+        notebook.add(view_tab, text="  例程结构  ")
+        self._build_view_setup_tab(view_tab)
+
+        # Tab 3：测试系统设计（可编辑，用于新建/编辑测试系统）
+        edit_tab = tk.Frame(notebook, bg=COLOR_BG)
+        notebook.add(edit_tab, text="  测试系统设计  ")
+        self._build_edit_setup_tab(edit_tab)
+
+        # RoutinePanel 初始化时会自动选择第一个例程，此时 view_setup_panel
+        # 尚未创建，因此在这里手动同步一次当前例程到例程结构面板。
+        current = getattr(self.routine_panel, "current_routine", None)
+        if current is not None:
+            self.view_setup_panel.set_current_routine(current)
+            try:
+                idx = self.notebook.index(self.view_setup_panel.master)
+                self.notebook.tab(idx, text=f"  例程结构: {current.name}  ")
+            except Exception:
+                pass
+        else:
+            self.view_setup_panel.set_current_routine(None)
+
+    def _build_run_tab(self, parent):
+        """构建原来的运行主界面。"""
         # 主区域：左侧可滚动面板 + 右侧图/日志
-        main_paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        main_paned.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 8))
+        main_paned = ttk.PanedWindow(parent, orient=tk.HORIZONTAL)
+        main_paned.pack(fill=tk.BOTH, expand=True)
 
         # 先创建右侧面板，使 plot_panel / log_panel 在例程触发 on_select 前已存在
         right = tk.Frame(main_paned, bg=COLOR_BG)
@@ -172,6 +208,30 @@ class LabEngineApp(tk.Tk):
         main_paned.add(left_frame, weight=1)
         main_paned.add(right, weight=2)
 
+    def _build_view_setup_tab(self, parent):
+        """构建“例程结构”只读查看页面。"""
+        self.view_setup_panel = SetupPanel(
+            parent,
+            routine_registry=self.registry,
+            scale=self.scale,
+            viewer_mode=True,
+        )
+        self.view_setup_panel.pack(fill=tk.BOTH, expand=True)
+
+    def _build_edit_setup_tab(self, parent):
+        """构建“测试系统设计”可编辑页面。"""
+        self.edit_setup_panel = SetupPanel(
+            parent,
+            routine_registry=self.registry,
+            scale=self.scale,
+            on_apply=self._on_setup_apply,
+        )
+        self.edit_setup_panel.pack(fill=tk.BOTH, expand=True)
+
+    def _on_setup_apply(self, graph):
+        """Setup 框图点击"应用到运行配置"时的回调（当前仅记录日志）。"""
+        self.log_panel.append("测试系统设计已应用（当前版本仅预览）")
+
     def _browse_output_dir(self):
         path = filedialog.askdirectory(title="选择输出目录", initialdir=self.output_dir_var.get())
         if path:
@@ -186,6 +246,16 @@ class LabEngineApp(tk.Tk):
             self.log_panel.append(f"已加载例程: {routine.name}")
         else:
             self.connection_panel.set_instruments({})
+
+        # 同步当前例程到“例程结构”只读查看面板，并更新 Tab 标题显示例程名
+        if hasattr(self, "view_setup_panel") and self.view_setup_panel is not None:
+            self.view_setup_panel.set_current_routine(routine)
+            tab_text = f"  例程结构: {routine.name}  " if routine else "  例程结构  "
+            try:
+                idx = self.notebook.index(self.view_setup_panel.master)
+                self.notebook.tab(idx, text=tab_text)
+            except Exception:
+                pass
 
     def _on_run(self):
         routine = self.routine_panel.current_routine

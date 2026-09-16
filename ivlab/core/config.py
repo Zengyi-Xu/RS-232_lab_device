@@ -23,6 +23,15 @@ class ScanConfig:
     randomize_direction: bool = False  # 随机化扫描方向
     scan_type: str = "single"     # single, double, sweep (0->Vmax->0->-Vmax->0)
 
+    # Trigger Link 外部触发/触发输出（仅 Keithley 2400 系列）
+    external_trigger: bool = False        # 作为从机：等待 Trigger Link 输入
+    output_trigger: bool = False          # 作为主机：从 Trigger Link 输出触发
+    trigger_source: str = "IMM"           # 触发源：IMM/TLIN/TIM/MAN/BUS
+    trigger_count: int = 1                # 触发计数
+    trigger_output: str = "NONE"          # Trigger Out：SOUR/SENS/DEL/NONE
+    trigger_delay: float = 0.0            # 触发延迟（s）
+    external_trigger_timeout: float = 30.0  # 等待外部触发时的串口超时（s）
+
     def __post_init__(self):
         if self.points < 2:
             raise ValueError("points必须>=2")

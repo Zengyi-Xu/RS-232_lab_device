@@ -29,6 +29,14 @@ PARAMS = [
      "choices": ["single", "double", "sweep"], "default": "single"},
     {"name": "n_average", "label": "平均次数", "type": "int",
      "default": 1, "min": 1, "max": 100},
+    {"name": "external_trigger", "label": "使用外部触发", "type": "bool",
+     "default": False},
+    {"name": "trigger_timeout", "label": "外部触发超时 (s)", "type": "float",
+     "default": 30.0, "min": 0.1, "max": 3600.0},
+    {"name": "output_trigger", "label": "输出触发同步其他设备", "type": "bool",
+     "default": False},
+    {"name": "trigger_output_event", "label": "触发输出时机", "type": "choice",
+     "choices": ["SENS", "SOUR", "DEL"], "default": "SENS"},
 ]
 
 
@@ -53,6 +61,10 @@ def run(instruments, params, context):
         output_off_after=True,
         n_average=params["n_average"],
         scan_type=params["scan_type"],
+        external_trigger=params.get("external_trigger", False),
+        external_trigger_timeout=params.get("trigger_timeout", 30.0),
+        output_trigger=params.get("output_trigger", False),
+        trigger_output=params.get("trigger_output_event", "SENS"),
     )
 
     scanner = IVScanner(k2400, config)

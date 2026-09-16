@@ -17,7 +17,12 @@ InstrumentRegistry.register(
     cls_type=Cornerstone260,
     name="Cornerstone 260 单色仪",
     connection_params=[
-        {"name": "dll_path", "label": "Cornerstone.dll 路径（留空自动查找）", "type": "str", "default": ""},
+        {
+            "name": "dll_path",
+            "label": "Cornerstone.dll 路径（需先安装 Newport Mono Utility；留空自动查找）",
+            "type": "str",
+            "default": "",
+        },
     ],
 )
 

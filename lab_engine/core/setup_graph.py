@@ -189,8 +189,13 @@ class SetupGraph:
     # ------------------------------------------------------------------
     def add_edge(self, source_node: str, source_port: str,
                  target_node: str, target_port: str,
-                 edge_id: Optional[str] = None) -> Optional[Edge]:
-        """添加一条边，若连接非法则返回 None。"""
+                 edge_id: Optional[str] = None,
+                 allow_multi_input: bool = False) -> Optional[Edge]:
+        """添加一条边，若连接非法则返回 None。
+
+        allow_multi_input: 为 True 时允许同一 input 端口连接多条边，
+        用于代码依赖图等多对一场景。
+        """
         src = self.get_node(source_node)
         dst = self.get_node(target_node)
         if src is None or dst is None:
@@ -203,9 +208,10 @@ class SetupGraph:
             return None
 
         # 避免同一 input 端口被重复连接
-        for e in self.edges.values():
-            if e.target_node == target_node and e.target_port == target_port:
-                return None
+        if not allow_multi_input:
+            for e in self.edges.values():
+                if e.target_node == target_node and e.target_port == target_port:
+                    return None
 
         edge = Edge(
             edge_id=edge_id or _new_id("e"),

@@ -135,6 +135,8 @@ class SetupPanel(ttk.Frame):
 
         self._build_ui()
         self._bind_events()
+        # 默认进入编辑模式（viewer_mode 下保持只读）
+        self.set_editable(not self.viewer_mode)
 
     # ------------------------------------------------------------------
     # UI 构建
@@ -292,10 +294,7 @@ class SetupPanel(ttk.Frame):
         if not editable:
             self._select_node(None)
         else:
-            self._clear_property_panel()
-            ttk.Label(self.prop_frame, text="编辑模式：添加节点并连线后，可生成例程代码",
-                      style="DimCard.TLabel", wraplength=dpi_scale(240, self.scale)).pack(
-                anchor=tk.W, pady=(4, 0))
+            self._show_edit_hint()
 
         mode = "编辑模式" if editable else "只读模式"
         self._set_status(f"已切换为 {mode}")
@@ -546,7 +545,7 @@ class SetupPanel(ttk.Frame):
                 self._erase_edge(edge_id)
         if self.selected_node_id == node_id:
             self.selected_node_id = None
-            self._clear_property_panel()
+            self._select_node(None)
         self._redraw_all_edges()
         self._update_minimap()
 
@@ -1191,8 +1190,10 @@ class SetupPanel(ttk.Frame):
         if node_id:
             self._update_node_selection_look(node_id)
             self._build_property_panel()
+        elif self._editable:
+            self._show_edit_hint()
         else:
-            self._clear_property_panel()
+            self._show_empty_property_panel()
 
     # ------------------------------------------------------------------
     # 临时连线
@@ -1301,9 +1302,18 @@ class SetupPanel(ttk.Frame):
             w.destroy()
         self._prop_widgets.clear()
         self._prop_vars.clear()
+
+    def _show_empty_property_panel(self):
+        self._clear_property_panel()
         ttk.Label(self.prop_frame, text="未选择节点", style="DimCard.TLabel").pack(
             anchor=tk.W, pady=(4, 0)
         )
+
+    def _show_edit_hint(self):
+        self._clear_property_panel()
+        ttk.Label(self.prop_frame, text="编辑模式：添加节点并连线后，可生成例程代码",
+                  style="DimCard.TLabel", wraplength=dpi_scale(240, self.scale)).pack(
+            anchor=tk.W, pady=(4, 0))
 
     def _build_property_panel(self):
         self._clear_property_panel()
@@ -1594,7 +1604,7 @@ def run(instruments, params, context):
         self.selected_node_id = None
         self.zoom = 1.0
         self._redraw_all()
-        self._clear_property_panel()
+        self._select_node(None)
         self._set_status("已加载 Setup 图")
 
     def _new_graph(self):

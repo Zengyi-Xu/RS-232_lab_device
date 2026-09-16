@@ -2,6 +2,28 @@
 
 ## 2026-09-16
 
+### 修复
+
+- **Setup 框图编辑器交互修复**：修复“测试系统设计”页面节点无法拖拽、属性面板始终显示“未选择节点”的问题。
+  - `SetupPanel` 初始化时默认进入编辑模式（非 viewer 模式），不再默认锁定为只读。
+  - 拆分属性面板清空逻辑：`_clear_property_panel()` 仅清空控件；`_show_empty_property_panel()` / `_show_edit_hint()`
+    分别负责无选中时的空状态提示；选中节点后不再残留“未选择节点”标签。
+
+### 新增
+
+- **Keithley 2400 Trigger Link 触发同步支持**：在 SCPI 层与 IV 扫描流程中完整封装 2400 后面板 Trigger Link（PS/2 口）触发功能。
+  - `ivlab/instruments/scpi_mixin.py` 新增 `set_trigger_source`、`set_trigger_count`、
+    `set_trigger_output`、`set_trigger_delay`、`init_measurement`、`fetch` 方法。
+  - `ivlab/core/config.py` 的 `ScanConfig` 新增 `external_trigger`（从机等待触发）、
+    `output_trigger`（主机输出触发）、`trigger_source`、`trigger_output`、`trigger_delay`、
+    `external_trigger_timeout` 字段。
+  - `ivlab/scanner/iv_scanner.py` 在 `setup_instrument()` 中根据配置下发触发命令：
+    - 从机模式自动设为 `TRIG:SOUR TLIN` 并延长串口超时，扫描结束后恢复原始超时。
+    - 主机模式自动设为 `TRIG:SOUR IMM` + `TRIG:OUTP SENS/SOUR/DEL`，可同步其他仪器。
+    - 支持“中继/级联”模式：同时启用外部触发与输出触发时，2400 等待上游触发，测量完成后再输出脉冲到下游。
+  - `lab_engine/routines/basic_iv_scan.py` 参数面板新增“使用外部触发”、“外部触发超时 (s)”、
+    “输出触发同步其他设备”、“触发输出时机”四个选项。
+
 ### 新增
 
 - **Lab Engine Setup 框图增强（Phase 2a/2b，解耦保留）**：重构可视化节点编辑器原型。

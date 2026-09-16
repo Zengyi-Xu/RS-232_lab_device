@@ -30,6 +30,7 @@ class IVScanner:
         self.logger = logger or setup_logger("scanner")
         self.results: List[ScanResult] = []
         self._stop_flag = False
+        self._original_timeout: Optional[float] = None
 
     def setup_instrument(self):
         """配置仪器参数"""
@@ -61,6 +62,36 @@ class IVScanner:
         # 设置源延迟
         if hasattr(inst, "set_source_delay"):
             inst.set_source_delay(cfg.source_delay)
+
+        # Trigger Link 触发配置（从机等待触发 / 主机输出触发）
+        if cfg.external_trigger or cfg.output_trigger or cfg.trigger_output != "NONE":
+            if hasattr(inst, "set_trigger_source"):
+                # 从机模式强制使用 TLIN；主机模式使用 IMM（或用户指定）
+                trigger_source = "TLIN" if cfg.external_trigger else cfg.trigger_source
+                trigger_output = cfg.trigger_output
+                if cfg.output_trigger and trigger_output == "NONE":
+                    trigger_output = "SENS"  # 默认在测量完成后输出触发脉冲
+
+                inst.set_trigger_source(trigger_source)
+                inst.set_trigger_count(cfg.trigger_count)
+                inst.set_trigger_output(trigger_output)
+                inst.set_trigger_delay(cfg.trigger_delay)
+
+                if cfg.external_trigger:
+                    # 延长串口超时，避免等待外部触发时过早返回空
+                    self._original_timeout = getattr(inst, "timeout", None)
+                    inst.timeout = cfg.external_trigger_timeout
+                    if hasattr(inst, "ser") and inst.ser is not None:
+                        inst.ser.timeout = cfg.external_trigger_timeout
+
+                self.logger.info(
+                    f"Trigger Link 已配置: source={trigger_source}, "
+                    f"count={cfg.trigger_count}, output={trigger_output}, "
+                    f"delay={cfg.trigger_delay}s"
+                    + (f", timeout={cfg.external_trigger_timeout}s" if cfg.external_trigger else "")
+                )
+            else:
+                self.logger.warning("当前仪器不支持 Trigger Link 触发配置，已忽略")
 
         # 清掉配置过程中可能产生的任何单条 warning，避免污染后续查询
         errs = inst.check_errors() if hasattr(inst, "check_errors") else []
@@ -171,34 +202,49 @@ class IVScanner:
             }
         )
 
+    def _restore_timeout(self):
+        """恢复原始串口超时"""
+        if self._original_timeout is None:
+            return
+        inst = self.instrument
+        if hasattr(inst, "timeout"):
+            inst.timeout = self._original_timeout
+        if hasattr(inst, "ser") and inst.ser is not None:
+            inst.ser.timeout = self._original_timeout
+        self._original_timeout = None
+        self.logger.debug("串口超时已恢复")
+
     def run(self, progress_callback: Optional[Callable] = None) -> List[ScanResult]:
         """执行完整扫描（含多次平均）"""
         self.results = []
         cfg = self.config
 
-        self.setup_instrument()
+        try:
+            self.setup_instrument()
 
-        for avg_idx in range(cfg.n_average):
-            self.logger.info(f"===== 第 {avg_idx+1}/{cfg.n_average} 次扫描 =====")
+            for avg_idx in range(cfg.n_average):
+                self.logger.info(f"===== 第 {avg_idx+1}/{cfg.n_average} 次扫描 =====")
 
-            # 确定方向
-            if cfg.randomize_direction and avg_idx % 2 == 1:
-                direction = "backward"
-            else:
-                direction = "forward"
+                # 确定方向
+                if cfg.randomize_direction and avg_idx % 2 == 1:
+                    direction = "backward"
+                else:
+                    direction = "forward"
 
-            result = self._run_single_scan(direction)
-            self.results.append(result)
+                result = self._run_single_scan(direction)
+                self.results.append(result)
 
-            if progress_callback:
-                progress_callback(avg_idx + 1, cfg.n_average, result)
+                if progress_callback:
+                    progress_callback(avg_idx + 1, cfg.n_average, result)
 
-            if self._stop_flag:
-                break
+                if self._stop_flag:
+                    break
 
-            # 扫描间隔
-            if avg_idx < cfg.n_average - 1:
-                time.sleep(0.5)
+                # 扫描间隔
+                if avg_idx < cfg.n_average - 1:
+                    time.sleep(0.5)
+        finally:
+            self._restore_timeout()
 
         return self.results
 

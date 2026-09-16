@@ -47,6 +47,12 @@ class HysteresisAnalyzer:
         v_bwd = backward_result.voltages
         i_bwd = backward_result.currents
 
+        # 若反向扫描电压为递减，需先反转使其单调递增，
+        # 否则 np.interp 会按错误顺序插值
+        if len(v_bwd) > 1 and v_bwd[-1] < v_bwd[0]:
+            v_bwd = v_bwd[::-1]
+            i_bwd = i_bwd[::-1]
+
         # 创建统一电压网格（取交集范围）
         v_min = max(v_fwd.min(), v_bwd.min())
         v_max = min(v_fwd.max(), v_bwd.max())

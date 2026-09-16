@@ -167,8 +167,12 @@ def configure_styles(root: tk.Tk, scale: float):
               foreground=[("selected", "#FFFFFF")])
 
     style.configure("TSeparator", background=COLOR_BORDER)
+    # 滚动条加粗到约 3 倍，便于触摸/鼠标拖拽
+    sb_width = int(round(36 * scale))
     style.configure("Vertical.TScrollbar", background="#D5DDE4", troughcolor=COLOR_BG,
-                    borderwidth=0, arrowsize=12)
+                    borderwidth=0, arrowsize=int(round(18 * scale)), width=sb_width)
+    style.configure("Horizontal.TScrollbar", background="#D5DDE4", troughcolor=COLOR_BG,
+                    borderwidth=0, arrowsize=int(round(18 * scale)), width=sb_width)
 
 
 def make_card(parent, **pack_kwargs):

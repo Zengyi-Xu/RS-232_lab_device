@@ -138,3 +138,40 @@ class SCPIMixin:
                 break
             errors.append(resp)
         return errors
+
+    # ------------------------------------------------------------------
+    # Trigger Link 外部触发
+    # ------------------------------------------------------------------
+    def set_trigger_source(self, source: str):
+        """设置触发源：IMM/TLIN/TIM/MAN/BUS（2400 后面板 Trigger Link 用 TLIN）"""
+        source = source.upper()
+        if source not in {"IMM", "TLIN", "TIM", "MAN", "BUS"}:
+            raise ConfigurationError(f"不支持的触发源: {source}")
+        self.write(f":TRIG:SOUR {source}")
+        self.logger.debug(f"[{self.model}] 触发源设为 {source}")
+
+    def set_trigger_count(self, count):
+        """设置触发计数；逐点外部同步时设为 1"""
+        self.write(f":TRIG:COUN {count}")
+        self.logger.debug(f"[{self.model}] 触发计数设为 {count}")
+
+    def set_trigger_output(self, event: str):
+        """设置 Trigger Out 输出时机：SOUR/SENS/DEL/NONE"""
+        event = event.upper()
+        if event not in {"SOUR", "SENS", "DEL", "NONE"}:
+            raise ConfigurationError(f"不支持的触发输出: {event}")
+        self.write(f":TRIG:OUTP {event}")
+        self.logger.debug(f"[{self.model}] 触发输出设为 {event}")
+
+    def set_trigger_delay(self, delay: float):
+        """设置触发到达后的延迟（秒）"""
+        self.write(f":TRIG:DEL {delay}")
+        self.logger.debug(f"[{self.model}] 触发延迟设为 {delay}s")
+
+    def init_measurement(self):
+        """启动测量并进入等待触发状态（配合 TLIN 使用）"""
+        self.write(":INIT")
+
+    def fetch(self) -> str:
+        """取回已完成的测量结果（配合 :INIT 使用）"""
+        return self.query(":FETC?")

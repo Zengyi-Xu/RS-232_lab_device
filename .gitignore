@@ -39,6 +39,10 @@ data/
 examples/logs/
 examples/data/
 
+# Debug screenshots / temporary captures
+debug/
+setup_screenshot.png
+
 # OS
 .DS_Store
 Thumbs.db

@@ -5,6 +5,9 @@ Cornerstone.dll（.NET 2.0，依赖 CyUSB.dll + Cypress USB 驱动）。
 该 DLL 在 64 位进程下枚举设备时会触发 IntPtr 溢出，只能在 32 位进程
 中运行，因此本驱动通过 32 位 Windows PowerShell 子进程桥接
 （见 _cornerstone_bridge.ps1），主进程通过 JSON 行协议与其通信。
+
+使用 USB 接口前，必须先在 Windows 上安装 Newport Mono Utility（例如
+5.0.4 版本），否则找不到 Cornerstone.dll 和 Cypress USB 驱动。
 """
 import json
 import os
@@ -147,8 +150,8 @@ class Cornerstone260(Monochromator):
             if os.path.exists(candidate):
                 return candidate
         raise ConnectionError(
-            "未找到 Cornerstone.dll，请通过 Mono Utility 安装 Newport 驱动，"
-            "或显式传入 dll_path"
+            "未找到 Cornerstone.dll。请确认已安装 Newport Mono Utility "
+            "（例如 5.0.4 版本），或显式传入 dll_path 指向 Cornerstone.dll"
         )
 
     # --- 连接管理 ---
